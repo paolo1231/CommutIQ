@@ -361,6 +361,39 @@ export class SupabaseService {
     }
   }
 
+  async updateLesson(lessonId: string, updates: Partial<Lesson>): Promise<APIResponse<Lesson>> {
+    try {
+      const { data, error } = await this.supabase
+        .from('lessons')
+        .update(updates)
+        .eq('id', lessonId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return { data };
+    } catch (error) {
+      console.error('Update Lesson Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async getSubjectById(subjectId: string): Promise<Subject | null> {
+    try {
+      const { data, error } = await this.supabase
+        .from('subjects')
+        .select('*')
+        .eq('id', subjectId)
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Get Subject By ID Error:', error);
+      return null;
+    }
+  }
+
   // Progress Tracking
   async updateProgress(progress: Omit<UserProgress, 'id' | 'created_at' | 'updated_at'>): Promise<APIResponse<UserProgress>> {
     try {
@@ -473,19 +506,44 @@ export class SupabaseService {
   }
 
   // Storage Operations
-  async uploadAudio(audioBuffer: ArrayBuffer, path: string): Promise<APIResponse<string>> {
+  async uploadAudio(
+    audioBuffer: ArrayBuffer,
+    path: string,
+    options: {
+      bucket?: string;
+      quality?: 'standard' | 'high';
+      contentType?: string;
+      metadata?: Record<string, any>;
+    } = {}
+  ): Promise<APIResponse<string>> {
     try {
+      const {
+        bucket = 'lesson-audio',
+        quality = 'standard',
+        contentType = 'audio/mpeg',
+        metadata = {}
+      } = options;
+
+      // Add quality and upload metadata
+      const uploadMetadata = {
+        quality,
+        uploaded_at: new Date().toISOString(),
+        size: audioBuffer.byteLength,
+        ...metadata
+      };
+
       const { data, error } = await this.supabase.storage
-        .from('lesson-audio')
+        .from(bucket)
         .upload(path, audioBuffer, {
-          contentType: 'audio/mpeg',
+          contentType,
           upsert: true,
+          metadata: uploadMetadata,
         });
 
       if (error) throw error;
 
       const { data: { publicUrl } } = this.supabase.storage
-        .from('lesson-audio')
+        .from(bucket)
         .getPublicUrl(path);
 
       return { data: publicUrl };
@@ -495,16 +553,180 @@ export class SupabaseService {
     }
   }
 
-  async downloadAudio(path: string): Promise<APIResponse<ArrayBuffer>> {
+  async downloadAudio(path: string, bucket: string = 'lesson-audio'): Promise<APIResponse<ArrayBuffer>> {
     try {
       const { data, error } = await this.supabase.storage
-        .from('lesson-audio')
+        .from(bucket)
         .download(path);
 
       if (error) throw error;
       return { data: await data.arrayBuffer() };
     } catch (error) {
       console.error('Download Audio Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async getAudioUrl(path: string, bucket: string = 'lesson-audio'): Promise<APIResponse<string>> {
+    try {
+      const { data: { publicUrl } } = this.supabase.storage
+        .from(bucket)
+        .getPublicUrl(path);
+
+      return { data: publicUrl };
+    } catch (error) {
+      console.error('Get Audio URL Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async deleteAudio(path: string, bucket: string = 'lesson-audio'): Promise<APIResponse<boolean>> {
+    try {
+      const { error } = await this.supabase.storage
+        .from(bucket)
+        .remove([path]);
+
+      if (error) throw error;
+      return { data: true };
+    } catch (error) {
+      console.error('Delete Audio Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async listAudioFiles(
+    folder: string = '',
+    bucket: string = 'lesson-audio',
+    options: {
+      limit?: number;
+      offset?: number;
+      sortBy?: { column: string; order: 'asc' | 'desc' };
+    } = {}
+  ): Promise<APIResponse<any[]>> {
+    try {
+      const { limit = 100, offset = 0, sortBy } = options;
+
+      const { data, error } = await this.supabase.storage
+        .from(bucket)
+        .list(folder, {
+          limit,
+          offset,
+          sortBy,
+        });
+
+      if (error) throw error;
+      return { data };
+    } catch (error) {
+      console.error('List Audio Files Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async getStorageStats(userId?: string): Promise<APIResponse<any>> {
+    try {
+      const { data, error } = await this.supabase.rpc('get_storage_stats', {
+        user_id: userId || null
+      });
+
+      if (error) throw error;
+      return { data };
+    } catch (error) {
+      console.error('Get Storage Stats Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async getAudioStatsByQuality(bucket: string = 'lesson-audio'): Promise<APIResponse<any>> {
+    try {
+      const { data, error } = await this.supabase.rpc('get_audio_stats_by_quality', {
+        bucket_name: bucket
+      });
+
+      if (error) throw error;
+      return { data };
+    } catch (error) {
+      console.error('Get Audio Stats By Quality Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async cleanupOldFiles(bucket: string, olderThanDays: number = 30): Promise<APIResponse<number>> {
+    try {
+      const { data, error } = await this.supabase.rpc('cleanup_old_storage_files', {
+        bucket_name: bucket,
+        older_than_days: olderThanDays
+      });
+
+      if (error) throw error;
+      return { data };
+    } catch (error) {
+      console.error('Cleanup Old Files Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async updateAudioMetadata(
+    bucket: string,
+    filePath: string,
+    metadata: Record<string, any>
+  ): Promise<APIResponse<boolean>> {
+    try {
+      const { data, error } = await this.supabase.rpc('update_audio_metadata', {
+        bucket_name: bucket,
+        file_path: filePath,
+        new_metadata: metadata
+      });
+
+      if (error) throw error;
+      return { data };
+    } catch (error) {
+      console.error('Update Audio Metadata Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async getPreloadCandidates(
+    bucket: string = 'lesson-audio',
+    limitCount: number = 50
+  ): Promise<APIResponse<any[]>> {
+    try {
+      const { data, error } = await this.supabase.rpc('get_preload_candidates', {
+        bucket_name: bucket,
+        limit_count: limitCount
+      });
+
+      if (error) throw error;
+      return { data };
+    } catch (error) {
+      console.error('Get Preload Candidates Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async getCdnCacheStats(bucket: string = 'lesson-audio'): Promise<APIResponse<any>> {
+    try {
+      const { data, error } = await this.supabase.rpc('get_cdn_cache_stats', {
+        bucket_name: bucket
+      });
+
+      if (error) throw error;
+      return { data };
+    } catch (error) {
+      console.error('Get CDN Cache Stats Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async cleanupDuplicateFiles(bucket: string = 'lesson-audio'): Promise<APIResponse<number>> {
+    try {
+      const { data, error } = await this.supabase.rpc('cleanup_duplicate_audio_files', {
+        bucket_name: bucket
+      });
+
+      if (error) throw error;
+      return { data };
+    } catch (error) {
+      console.error('Cleanup Duplicate Files Error:', error);
       return { error: error.message };
     }
   }

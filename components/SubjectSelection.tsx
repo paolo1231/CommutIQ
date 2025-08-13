@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabaseService } from '../services/supabaseService';
 import { Subject } from '../types';
 
@@ -15,6 +15,10 @@ export const SubjectSelection: React.FC<SubjectSelectionProps> = ({ userId, comm
   const [selectedSubjectIds, setSelectedSubjectIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [screenData, setScreenData] = useState(() => {
+    const { width, height } = Dimensions.get('window');
+    return { width, height };
+  });
 
   // Icon mapping for subjects
   const getSubjectIcon = (name: string): keyof typeof Ionicons.glyphMap => {
@@ -50,6 +54,15 @@ export const SubjectSelection: React.FC<SubjectSelectionProps> = ({ userId, comm
     return colorMap[name] || { background: '#f3f4f6', text: '#6b7280' };
   };
 
+  // Add orientation detection using Dimensions API
+  useEffect(() => {
+    const subscription = Dimensions.addEventListener('change', ({ window }) => {
+      setScreenData({ width: window.width, height: window.height });
+    });
+
+    return () => subscription?.remove();
+  }, []);
+
   useEffect(() => {
     loadSubjects();
   }, []);
@@ -79,7 +92,7 @@ export const SubjectSelection: React.FC<SubjectSelectionProps> = ({ userId, comm
 
   const handleContinue = async () => {
     if (selectedSubjectIds.length === 0) return;
-    
+
     setSaving(true);
     try {
       // Save user subject selections
@@ -98,8 +111,38 @@ export const SubjectSelection: React.FC<SubjectSelectionProps> = ({ userId, comm
     }
   };
 
-  const screenWidth = Dimensions.get('window').width;
-  const cardWidth = (screenWidth - 48) / 2; // 48 = padding (16) * 2 + gap (16)
+  // Create dynamic grid calculation based on screen width breakpoints
+  const getGridConfiguration = () => {
+    const { width } = screenData;
+    const horizontalPadding = 32; // 16px on each side
+    const gridGap = 16;
+    const availableWidth = width - horizontalPadding;
+
+    // Use 640px breakpoint (similar to Tailwind's sm:) for better web compatibility
+    const isMobile = width < 640;
+    const columns = isMobile ? 1 : 2;
+
+    // Calculate card width with consistent sizing
+    let cardWidth;
+    if (isMobile) {
+      // Mobile: use most of available width but cap at 400px for better UX
+      cardWidth = Math.min(availableWidth, 400);
+    } else {
+      // Desktop: calculate for 2 columns with gap, but ensure reasonable max width
+      const twoColumnWidth = (availableWidth - gridGap) / 2;
+      cardWidth = Math.min(twoColumnWidth, 320); // Max 320px per card on desktop
+    }
+
+    return {
+      columns,
+      cardWidth,
+      gridGap,
+      isMobile,
+      screenWidth: width
+    };
+  };
+
+  const gridConfig = getGridConfiguration();
 
   if (loading) {
     return (
@@ -115,43 +158,47 @@ export const SubjectSelection: React.FC<SubjectSelectionProps> = ({ userId, comm
       <View style={styles.content}>
         <Text style={styles.title}>What would you like to learn?</Text>
         <Text style={styles.description}>
-          Select subjects you're interested in learning during your {commuteTime}-minute commute. 
+          Select subjects you're interested in learning during your {commuteTime}-minute commute.
           We'll create personalized micro-lessons for you.
         </Text>
 
         <View style={styles.subjectsGrid}>
-          {subjects.map(subject => {
+          {subjects.map((subject, index) => {
             const isSelected = selectedSubjectIds.includes(subject.id);
             const colors = getSubjectColor(subject.name);
             const icon = getSubjectIcon(subject.name);
-            
+
             return (
               <TouchableOpacity
                 key={subject.id}
                 style={[
                   styles.subjectCard,
-                  { width: cardWidth },
+                  {
+                    width: gridConfig.cardWidth,
+                  },
                   isSelected ? styles.selectedCard : styles.unselectedCard
                 ]}
                 onPress={() => toggleSubject(subject.id)}
               >
-                <View style={[
-                  styles.iconContainer,
-                  { backgroundColor: colors.background }
-                ]}>
-                  <Ionicons 
-                    name={icon} 
-                    size={24} 
-                    color={colors.text} 
-                  />
-                </View>
-                <Text style={styles.subjectName}>{subject.name}</Text>
-                {subject.is_premium && (
-                  <View style={styles.premiumBadge}>
-                    <Ionicons name="star" size={12} color="#f59e0b" />
-                    <Text style={styles.premiumText}>Premium</Text>
+                <View style={styles.cardContent}>
+                  <View style={[
+                    styles.iconContainer,
+                    { backgroundColor: colors.background }
+                  ]}>
+                    <Ionicons
+                      name={icon}
+                      size={28}
+                      color={colors.text}
+                    />
                   </View>
-                )}
+                  <Text style={styles.subjectName}>{subject.name}</Text>
+                  {subject.is_premium && (
+                    <View style={styles.premiumBadge}>
+                      <Ionicons name="star" size={12} color="#f59e0b" />
+                      <Text style={styles.premiumText}>Premium</Text>
+                    </View>
+                  )}
+                </View>
               </TouchableOpacity>
             );
           })}
@@ -189,38 +236,45 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 32,
     paddingBottom: 32,
+    alignItems: 'center',
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 8,
     color: '#1f2937',
+    textAlign: 'center',
+    maxWidth: 672, // 2 cards (320px each) + gap (16px) + some padding
   },
   description: {
     color: '#6b7280',
     lineHeight: 20,
     marginBottom: 32,
+    textAlign: 'center',
+    maxWidth: 672, // Match title width
   },
   subjectsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     marginBottom: 32,
+    alignItems: 'flex-start',
+    gap: 16, // Use gap property for consistent spacing
   },
   subjectCard: {
     backgroundColor: 'white',
-    borderRadius: 8,
+    borderRadius: 12,
     padding: 16,
-    marginBottom: 16,
     borderWidth: 2,
+    height: 140,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 1,
+      height: 4,
     },
-    shadowOpacity: 0.22,
-    shadowRadius: 2.22,
-    elevation: 3,
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 8,
   },
   selectedCard: {
     borderColor: '#4f46e5',
@@ -236,17 +290,22 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginBottom: 16,
+    alignSelf: 'center',
   },
   subjectName: {
+    fontSize: 16,
     fontWeight: '500',
     color: '#374151',
+    textAlign: 'center',
+    flex: 1,
   },
   continueButton: {
-    paddingVertical: 12,
-    borderRadius: 6,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 8,
     alignItems: 'center',
-    marginTop: 16,
+    marginTop: 24,
   },
   enabledButton: {
     backgroundColor: '#4f46e5',
@@ -276,6 +335,7 @@ const styles = StyleSheet.create({
   premiumBadge: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 8,
   },
   premiumText: {
@@ -283,5 +343,10 @@ const styles = StyleSheet.create({
     color: '#f59e0b',
     fontWeight: '600',
     marginLeft: 4,
+  },
+  cardContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

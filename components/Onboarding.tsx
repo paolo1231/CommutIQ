@@ -1,7 +1,8 @@
+import { showErrorAlert } from '@/utils/alertHelper';
 import { Ionicons } from '@expo/vector-icons';
-import Slider from '@react-native-community/slider';
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { UI_CONFIG } from '../constants';
 import { supabaseService } from '../services/supabaseService';
 import { UserPreferences } from '../types';
 
@@ -36,13 +37,13 @@ export const Onboarding: React.FC<OnboardingProps> = ({ userId, onComplete }) =>
       });
 
       if (result.error) {
-        Alert.alert('Error', 'Failed to save your profile. Please try again.');
+        showErrorAlert('Failed to save your profile. Please try again.');
         return;
       }
 
       onComplete(commuteTime);
     } catch (error) {
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+      showErrorAlert('Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -69,27 +70,56 @@ export const Onboarding: React.FC<OnboardingProps> = ({ userId, onComplete }) =>
             How long is your daily commute (one way)?
           </Text>
 
-          <View style={styles.sliderContainer}>
-            <Slider
-              style={styles.slider}
-              minimumValue={5}
-              maximumValue={120}
-              step={5}
-              value={commuteTime}
-              onValueChange={setCommuteTime}
-              minimumTrackTintColor="#4f46e5"
-              maximumTrackTintColor="#e5e7eb"
-            />
-            <View style={styles.sliderLabels}>
-              <Text style={styles.sliderLabel}>5m</Text>
-              <Text style={styles.sliderLabel}>60m</Text>
-              <Text style={styles.sliderLabel}>120m</Text>
+          <View style={styles.timeSelector}>
+            <View style={styles.timeDisplay}>
+              <Ionicons name="time-outline" size={20} color={UI_CONFIG.COLORS.PRIMARY} style={styles.timeIcon} />
+              <Text style={styles.timeText}>{commuteTime} minutes</Text>
             </View>
-          </View>
 
-          <View style={styles.timeDisplay}>
-            <Ionicons name="time-outline" size={16} color="#4f46e5" style={styles.timeIcon} />
-            <Text style={styles.timeText}>{commuteTime} min</Text>
+            <View style={styles.timeControls}>
+              <TouchableOpacity
+                style={styles.timeButton}
+                onPress={() => setCommuteTime(Math.max(5, commuteTime - 5))}
+                disabled={commuteTime <= 5}
+              >
+                <Ionicons name="remove" size={20} color={commuteTime <= 5 ? UI_CONFIG.COLORS.GRAY_400 : UI_CONFIG.COLORS.PRIMARY} />
+              </TouchableOpacity>
+
+              <View style={styles.timeRange}>
+                <Text style={styles.rangeText}>5 - 120 min</Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.timeButton}
+                onPress={() => setCommuteTime(Math.min(120, commuteTime + 5))}
+                disabled={commuteTime >= 120}
+              >
+                <Ionicons name="add" size={20} color={commuteTime >= 120 ? UI_CONFIG.COLORS.GRAY_400 : UI_CONFIG.COLORS.PRIMARY} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.quickOptions}>
+              <Text style={styles.quickOptionsLabel}>Quick select:</Text>
+              <View style={styles.quickButtons}>
+                {[15, 30, 45, 60].map((time) => (
+                  <TouchableOpacity
+                    key={time}
+                    style={[
+                      styles.quickButton,
+                      commuteTime === time && styles.quickButtonActive
+                    ]}
+                    onPress={() => setCommuteTime(time)}
+                  >
+                    <Text style={[
+                      styles.quickButtonText,
+                      commuteTime === time && styles.quickButtonTextActive
+                    ]}>
+                      {time}m
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
           </View>
         </View>
 
@@ -114,103 +144,137 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: UI_CONFIG.SPACING.LG,
+    backgroundColor: UI_CONFIG.COLORS.BACKGROUND,
   },
   card: {
-    backgroundColor: 'white',
-    borderRadius: 8,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    backgroundColor: UI_CONFIG.COLORS.SURFACE,
+    borderRadius: UI_CONFIG.BORDER_RADIUS.LG,
+    padding: UI_CONFIG.SPACING.XL,
+    ...UI_CONFIG.SHADOWS.MD,
     width: '100%',
     maxWidth: 400,
   },
   iconContainer: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: UI_CONFIG.SPACING.XL,
   },
   iconBackground: {
     backgroundColor: '#eef2ff',
-    padding: 16,
-    borderRadius: 50,
+    padding: UI_CONFIG.SPACING.LG,
+    borderRadius: UI_CONFIG.BORDER_RADIUS.FULL,
   },
   title: {
-    fontSize: 24,
+    fontSize: UI_CONFIG.FONT_SIZES.XXL,
     fontWeight: 'bold',
     textAlign: 'center',
-    marginBottom: 24,
-    color: '#1f2937',
+    marginBottom: UI_CONFIG.SPACING.XL,
+    color: UI_CONFIG.COLORS.TEXT_PRIMARY,
   },
   description: {
-    color: '#6b7280',
+    color: UI_CONFIG.COLORS.TEXT_SECONDARY,
     textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 32,
+    lineHeight: 24,
+    marginBottom: UI_CONFIG.SPACING.XXL,
+    fontSize: UI_CONFIG.FONT_SIZES.MD,
   },
   formContainer: {
-    marginBottom: 24,
+    marginBottom: UI_CONFIG.SPACING.XL,
   },
   label: {
-    color: '#374151',
-    fontWeight: '500',
-    marginBottom: 16,
+    color: UI_CONFIG.COLORS.TEXT_PRIMARY,
+    fontWeight: '600',
+    marginBottom: UI_CONFIG.SPACING.LG,
+    fontSize: UI_CONFIG.FONT_SIZES.MD,
   },
-  sliderContainer: {
-    marginBottom: 16,
-  },
-  slider: {
-    width: '100%',
-    height: 40,
-  },
-  sliderThumb: {
-    backgroundColor: '#4f46e5',
-    width: 20,
-    height: 20,
-  },
-  sliderLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
-  },
-  sliderLabel: {
-    fontSize: 12,
-    color: '#6b7280',
+  timeSelector: {
+    alignItems: 'center',
   },
   timeDisplay: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#eef2ff',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    alignSelf: 'center',
+    paddingHorizontal: UI_CONFIG.SPACING.LG,
+    paddingVertical: UI_CONFIG.SPACING.MD,
+    borderRadius: UI_CONFIG.BORDER_RADIUS.LG,
+    marginBottom: UI_CONFIG.SPACING.LG,
   },
   timeIcon: {
-    marginRight: 4,
+    marginRight: UI_CONFIG.SPACING.SM,
   },
   timeText: {
     fontWeight: 'bold',
-    color: '#4f46e5',
+    color: UI_CONFIG.COLORS.PRIMARY,
+    fontSize: UI_CONFIG.FONT_SIZES.LG,
   },
-  continueButton: {
-    backgroundColor: '#4f46e5',
-    paddingVertical: 12,
-    borderRadius: 6,
+  timeControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: UI_CONFIG.SPACING.LG,
+  },
+  timeButton: {
+    backgroundColor: UI_CONFIG.COLORS.SURFACE,
+    borderWidth: 2,
+    borderColor: UI_CONFIG.COLORS.GRAY_200,
+    borderRadius: UI_CONFIG.BORDER_RADIUS.LG,
+    padding: UI_CONFIG.SPACING.SM,
+    marginHorizontal: UI_CONFIG.SPACING.SM,
+  },
+  timeRange: {
+    paddingHorizontal: UI_CONFIG.SPACING.LG,
+  },
+  rangeText: {
+    color: UI_CONFIG.COLORS.TEXT_SECONDARY,
+    fontSize: UI_CONFIG.FONT_SIZES.SM,
+  },
+  quickOptions: {
     alignItems: 'center',
   },
-  continueButtonText: {
-    color: 'white',
+  quickOptionsLabel: {
+    color: UI_CONFIG.COLORS.TEXT_SECONDARY,
+    fontSize: UI_CONFIG.FONT_SIZES.SM,
+    marginBottom: UI_CONFIG.SPACING.SM,
+  },
+  quickButtons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  quickButton: {
+    backgroundColor: UI_CONFIG.COLORS.SURFACE,
+    borderWidth: 2,
+    borderColor: UI_CONFIG.COLORS.GRAY_200,
+    borderRadius: UI_CONFIG.BORDER_RADIUS.MD,
+    paddingHorizontal: UI_CONFIG.SPACING.MD,
+    paddingVertical: UI_CONFIG.SPACING.SM,
+    margin: UI_CONFIG.SPACING.XS,
+  },
+  quickButtonActive: {
+    backgroundColor: UI_CONFIG.COLORS.PRIMARY,
+    borderColor: UI_CONFIG.COLORS.PRIMARY,
+  },
+  quickButtonText: {
+    color: UI_CONFIG.COLORS.TEXT_SECONDARY,
+    fontSize: UI_CONFIG.FONT_SIZES.SM,
     fontWeight: '500',
-    fontSize: 16,
+  },
+  quickButtonTextActive: {
+    color: UI_CONFIG.COLORS.TEXT_ON_PRIMARY,
+  },
+  continueButton: {
+    backgroundColor: UI_CONFIG.COLORS.PRIMARY,
+    paddingVertical: UI_CONFIG.SPACING.MD,
+    borderRadius: UI_CONFIG.BORDER_RADIUS.LG,
+    alignItems: 'center',
+    ...UI_CONFIG.SHADOWS.SM,
+  },
+  continueButtonText: {
+    color: UI_CONFIG.COLORS.TEXT_ON_PRIMARY,
+    fontWeight: '600',
+    fontSize: UI_CONFIG.FONT_SIZES.MD,
   },
   continueButtonDisabled: {
-    backgroundColor: '#9ca3af',
+    backgroundColor: UI_CONFIG.COLORS.GRAY_400,
   },
 });

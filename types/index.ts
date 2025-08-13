@@ -219,6 +219,92 @@ export interface OpenAIResponse {
   };
 }
 
+// Storage and Audio Types
+export interface AudioCacheInfo {
+  lessonId: string;
+  localPath: string;
+  remoteUrl: string;
+  size: number;
+  quality: 'standard' | 'high';
+  downloadedAt: string;
+  lastAccessedAt: string;
+}
+
+export interface AudioUploadResult {
+  url: string;
+  path: string;
+  size: number;
+  duration?: number;
+}
+
+export interface StorageUploadOptions {
+  bucket?: string;
+  quality?: 'standard' | 'high';
+  contentType?: string;
+  metadata?: Record<string, any>;
+  cacheControl?: string;
+  contentEncoding?: string;
+}
+
+export interface StorageListOptions {
+  limit?: number;
+  offset?: number;
+  prefix?: string;
+  delimiter?: string;
+}
+
+export interface StorageFile {
+  name: string;
+  id: string;
+  updated_at: string;
+  created_at: string;
+  last_accessed_at: string;
+  metadata: {
+    eTag: string;
+    size: number;
+    mimetype: string;
+    cacheControl: string;
+    lastModified: string;
+    contentLength: number;
+    httpStatusCode: number;
+    quality?: string;
+    uploaded_at?: string;
+    cdn_optimized?: boolean;
+    cache_status?: string;
+  };
+}
+
+export interface StorageStats {
+  totalFiles: number;
+  totalSize: number;
+  availableSpace: number;
+  oldestFile: string | null;
+  newestFile: string | null;
+}
+
+export interface CacheStats {
+  totalFiles: number;
+  totalSize: number;
+  availableSpace: number;
+  oldestFile: string | null;
+  newestFile: string | null;
+}
+
+export interface AudioQualityStats {
+  high_quality: {
+    count: number;
+    total_size: number;
+  };
+  standard_quality: {
+    count: number;
+    total_size: number;
+  };
+  total: {
+    count: number;
+    total_size: number;
+  };
+}
+
 // External Integration Types
 export interface SpotifyIntegration {
   user_id: string;
@@ -254,7 +340,7 @@ export interface AppError {
   timestamp: string;
 }
 
-export type ErrorCode = 
+export type ErrorCode =
   | 'NETWORK_ERROR'
   | 'AUTH_ERROR'
   | 'VALIDATION_ERROR'
