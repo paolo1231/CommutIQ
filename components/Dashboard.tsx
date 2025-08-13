@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { CourseCard } from './CourseCard';
-import { ProgressBar } from './ProgressBar';
 import { PremiumBanner } from './PremiumBanner';
+import { ProgressBar } from './ProgressBar';
 
 interface Subject {
   id: number;
@@ -113,45 +113,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData }) => {
     }));
   };
 
-  const totalProgress = courses.length > 0 
-    ? courses.reduce((sum, course) => sum + course.completedLessons / course.totalLessons, 0) / courses.length 
+  const totalProgress = courses.length > 0
+    ? courses.reduce((sum, course) => sum + course.completedLessons / course.totalLessons, 0) / courses.length
     : 0;
 
-  const statsData = [
-    {
-      icon: 'play-outline' as keyof typeof Ionicons.glyphMap,
-      value: courses.reduce((sum, course) => sum + course.completedLessons, 0),
-      label: 'Lessons Completed',
-      color: '#4f46e5',
-      background: '#eef2ff'
-    },
-    {
-      icon: 'bookmark-outline' as keyof typeof Ionicons.glyphMap,
-      value: courses.length,
-      label: 'Active Courses',
-      color: '#f59e0b',
-      background: '#fef3c7'
-    },
-    {
-      icon: 'bar-chart-outline' as keyof typeof Ionicons.glyphMap,
-      value: commuteTime * 2,
-      label: 'Minutes/Day',
-      color: '#10b981',
-      background: '#d1fae5'
-    },
-    {
-      icon: 'trophy-outline' as keyof typeof Ionicons.glyphMap,
-      value: 0,
-      label: 'Achievements',
-      color: '#8b5cf6',
-      background: '#ede9fe'
-    }
-  ];
-
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <View style={styles.content}>
-        {/* Progress Overview */}
+    <View style={styles.container}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        {/* Learning Journey Progress Card */}
         <View style={styles.progressCard}>
           <View style={styles.progressHeader}>
             <Text style={styles.progressTitle}>Your Learning Journey</Text>
@@ -160,18 +129,46 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData }) => {
             </Text>
           </View>
           <ProgressBar progress={totalProgress} />
-          
+
           {/* Stats Grid */}
           <View style={styles.statsGrid}>
-            {statsData.map((stat, index) => (
-              <View key={index} style={[styles.statCard, { backgroundColor: stat.background }]}>
-                <View style={styles.statIconContainer}>
-                  <Ionicons name={stat.icon} size={24} color={stat.color} />
-                </View>
-                <Text style={[styles.statValue, { color: stat.color }]}>{stat.value}</Text>
-                <Text style={styles.statLabel}>{stat.label}</Text>
+            <View style={styles.statCard}>
+              <View style={[styles.statIconContainer, { backgroundColor: '#eef2ff' }]}>
+                <Ionicons name="play-outline" size={24} color="#6366f1" />
               </View>
-            ))}
+              <Text style={[styles.statValue, { color: '#6366f1' }]}>
+                {courses.reduce((sum, course) => sum + course.completedLessons, 0)}
+              </Text>
+              <Text style={styles.statLabel}>Lessons Completed</Text>
+            </View>
+
+            <View style={styles.statCard}>
+              <View style={[styles.statIconContainer, { backgroundColor: '#fef3c7' }]}>
+                <Ionicons name="bookmark-outline" size={24} color="#f59e0b" />
+              </View>
+              <Text style={[styles.statValue, { color: '#f59e0b' }]}>
+                {courses.length}
+              </Text>
+              <Text style={styles.statLabel}>Active Courses</Text>
+            </View>
+
+            <View style={styles.statCard}>
+              <View style={[styles.statIconContainer, { backgroundColor: '#d1fae5' }]}>
+                <Ionicons name="bar-chart-outline" size={24} color="#10b981" />
+              </View>
+              <Text style={[styles.statValue, { color: '#10b981' }]}>
+                {commuteTime * 2}
+              </Text>
+              <Text style={styles.statLabel}>Minutes/Day</Text>
+            </View>
+
+            <View style={styles.statCard}>
+              <View style={[styles.statIconContainer, { backgroundColor: '#ede9fe' }]}>
+                <Ionicons name="trophy-outline" size={24} color="#8b5cf6" />
+              </View>
+              <Text style={[styles.statValue, { color: '#8b5cf6' }]}>0</Text>
+              <Text style={styles.statLabel}>Achievements</Text>
+            </View>
           </View>
         </View>
 
@@ -180,12 +177,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData }) => {
 
         {/* Your Courses */}
         <Text style={styles.sectionTitle}>Your Courses</Text>
-        <View style={styles.coursesContainer}>
+        <View style={styles.coursesGrid}>
           {courses.map(course => (
-            <CourseCard 
-              key={course.id} 
-              course={course} 
-              onStartLesson={() => startLesson(course.id)} 
+            <CourseCard
+              key={course.id}
+              course={course}
+              onStartLesson={() => startLesson(course.id)}
             />
           ))}
         </View>
@@ -195,42 +192,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData }) => {
           <Ionicons name="star-outline" size={20} color="#f59e0b" style={styles.premiumIcon} />
           <Text style={styles.sectionTitle}>Premium Courses</Text>
         </View>
-        <View style={styles.coursesContainer}>
+        <View style={styles.coursesGrid}>
           {premiumCourses.map(course => (
-            <CourseCard 
-              key={course.id} 
-              course={course} 
-              onStartLesson={() => {}} 
+            <CourseCard
+              key={course.id}
+              course={course}
+              onStartLesson={() => { }}
             />
           ))}
         </View>
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#f8fafc',
   },
-  content: {
+  scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 32,
     paddingBottom: 32,
   },
   progressCard: {
     backgroundColor: 'white',
-    borderRadius: 8,
+    borderRadius: 12,
     padding: 24,
-    marginBottom: 24,
+    marginBottom: 32,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: 2,
     },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
   },
   progressHeader: {
     flexDirection: 'row',
@@ -240,46 +238,54 @@ const styles = StyleSheet.create({
   },
   progressTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontWeight: '700',
     color: '#1f2937',
   },
   progressPercentage: {
     fontSize: 14,
     color: '#6b7280',
+    fontWeight: '500',
   },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
     marginTop: 24,
+    gap: 16,
   },
   statCard: {
     width: '48%',
     padding: 16,
-    borderRadius: 8,
+    borderRadius: 12,
     alignItems: 'center',
-    marginBottom: 16,
+    backgroundColor: '#f8fafc',
   },
   statIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 8,
   },
   statValue: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontWeight: '700',
     marginBottom: 4,
   },
   statLabel: {
     fontSize: 12,
     color: '#6b7280',
     textAlign: 'center',
+    fontWeight: '500',
   },
   sectionTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontWeight: '700',
     color: '#1f2937',
     marginBottom: 16,
   },
-  coursesContainer: {
+  coursesGrid: {
     marginBottom: 32,
   },
   premiumHeader: {
