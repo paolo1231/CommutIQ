@@ -296,7 +296,7 @@ export const API_ENDPOINTS = {
 export const OPENAI_CONFIG = {
   API_URL: 'https://api.openai.com/v1',
   MODELS: {
-    CHAT: 'gpt-4',
+    CHAT: 'gpt-5-nano',
     TTS: 'tts-1',
   },
   TTS_VOICES: [

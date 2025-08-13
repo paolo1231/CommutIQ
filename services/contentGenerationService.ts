@@ -45,7 +45,7 @@ export class ContentGenerationService {
             );
 
             // Create course in database
-            const course = await supabaseService.createCourse({
+            const courseResponse = await supabaseService.createCourse({
                 title: courseStructure.title,
                 subject_id: request.subject_id,
                 user_id: request.user_id,
@@ -54,6 +54,12 @@ export class ContentGenerationService {
                 difficulty: courseStructure.difficulty,
                 is_premium: subject.is_premium,
             });
+
+            if (courseResponse.error || !courseResponse.data) {
+                throw new Error(courseResponse.error || 'Failed to create course');
+            }
+
+            const course = courseResponse.data;
 
             // Generate and save lessons
             for (let i = 0; i < courseStructure.lessons.length; i++) {
@@ -122,7 +128,7 @@ export class ContentGenerationService {
             );
 
             // Save lesson to database
-            const lesson = await supabaseService.createLesson({
+            const lessonResponse = await supabaseService.createLesson({
                 course_id: courseId,
                 title: lessonContent.title,
                 content: lessonContent.content,
@@ -131,6 +137,12 @@ export class ContentGenerationService {
                 transcript: lessonContent.transcript,
                 lesson_order: request.lesson_order,
             });
+
+            if (lessonResponse.error || !lessonResponse.data) {
+                throw new Error(lessonResponse.error || 'Failed to create lesson');
+            }
+
+            const lesson = lessonResponse.data;
 
             // Generate and save lesson interactions
             if (lessonContent.interactions && lessonContent.interactions.length > 0) {
@@ -218,22 +230,17 @@ export class ContentGenerationService {
      */
     private async uploadAudioToStorage(audioBuffer: Buffer, path: string): Promise<string> {
         try {
-            const { data, error } = await supabaseService.supabase.storage
-                .from('lesson-audio')
-                .upload(path, audioBuffer, {
-                    contentType: 'audio/mpeg',
-                    upsert: true,
-                });
+            // Use the supabaseService uploadAudio method instead of direct access
+            const uploadResponse = await supabaseService.uploadAudio(audioBuffer, path, {
+                bucket: 'lesson-audio',
+                contentType: 'audio/mpeg',
+            });
 
-            if (error) {
-                throw error;
+            if (uploadResponse.error || !uploadResponse.data) {
+                throw new Error(uploadResponse.error || 'Failed to upload audio');
             }
 
-            const { data: { publicUrl } } = supabaseService.supabase.storage
-                .from('lesson-audio')
-                .getPublicUrl(path);
-
-            return publicUrl;
+            return uploadResponse.data;
         } catch (error) {
             console.error('Audio upload failed:', error);
             throw new Error('Failed to upload audio file');
@@ -263,10 +270,9 @@ export class ContentGenerationService {
                             content: prompt,
                         },
                     ],
-                    max_tokens: maxTokens,
+                    max_completion_tokens: maxTokens,
                     temperature: OPENAI_CONFIG.TEMPERATURE,
                 }),
-                timeout: OPENAI_CONFIG.REQUEST_TIMEOUT,
             });
 
             if (!response.ok) {
@@ -486,7 +492,7 @@ Make the transcript sound natural when spoken aloud, with appropriate pacing for
         console.log('Generating fallback course for:', subject.name);
 
         // Create a basic course structure
-        const course = await supabaseService.createCourse({
+        const courseResponse = await supabaseService.createCourse({
             title: `Introduction to ${subject.name}`,
             subject_id: subject.id,
             user_id: userId,
@@ -495,6 +501,12 @@ Make the transcript sound natural when spoken aloud, with appropriate pacing for
             difficulty: 'beginner',
             is_premium: subject.is_premium,
         });
+
+        if (courseResponse.error || !courseResponse.data) {
+            throw new Error(courseResponse.error || 'Failed to create fallback course');
+        }
+
+        const course = courseResponse.data;
 
         // Create basic lessons
         const basicLessons = this.getFallbackLessons(subject.name, commuteTime);
@@ -553,10 +565,12 @@ Make the transcript sound natural when spoken aloud, with appropriate pacing for
      */
     async regenerateLessonAudio(lessonId: string, voice?: string): Promise<string> {
         try {
-            const lesson = await supabaseService.getLessonById(lessonId);
-            if (!lesson) {
-                throw new Error('Lesson not found');
+            const lessonResponse = await supabaseService.getLessonById(lessonId);
+            if (lessonResponse.error || !lessonResponse.data) {
+                throw new Error(lessonResponse.error || 'Lesson not found');
             }
+
+            const lesson = lessonResponse.data;
 
             // Generate new audio
             const audioBuffer = await this.generateAudio(lesson.transcript, voice);
@@ -568,7 +582,10 @@ Make the transcript sound natural when spoken aloud, with appropriate pacing for
             );
 
             // Update lesson with new audio URL
-            await supabaseService.updateLesson(lessonId, { audio_url: audioUrl });
+            const updateResponse = await supabaseService.updateLesson(lessonId, { audio_url: audioUrl });
+            if (updateResponse.error) {
+                throw new Error(updateResponse.error);
+            }
 
             return audioUrl;
         } catch (error) {

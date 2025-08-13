@@ -240,41 +240,41 @@ ALTER TABLE lessons ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can view lessons for their courses" 
 ON lessons FOR SELECT 
+TO authenticated
 USING (
     EXISTS (
         SELECT 1 FROM courses 
-        WHERE courses.id = lessons.course_id 
-        AND courses.user_id = auth.uid()
+        WHERE courses.user_id = auth.uid()
     )
 );
 
 CREATE POLICY "Users can create lessons for their courses" 
 ON lessons FOR INSERT 
+TO authenticated
 WITH CHECK (
     EXISTS (
         SELECT 1 FROM courses 
-        WHERE courses.id = lessons.course_id 
-        AND courses.user_id = auth.uid()
+        WHERE courses.user_id = auth.uid()
     )
 );
 
 CREATE POLICY "Users can update lessons for their courses" 
 ON lessons FOR UPDATE 
+TO authenticated
 USING (
     EXISTS (
         SELECT 1 FROM courses 
-        WHERE courses.id = lessons.course_id 
-        AND courses.user_id = auth.uid()
+        WHERE courses.user_id = auth.uid()
     )
 );
 
 CREATE POLICY "Users can delete lessons for their courses" 
 ON lessons FOR DELETE 
+TO authenticated
 USING (
     EXISTS (
         SELECT 1 FROM courses 
-        WHERE courses.id = lessons.course_id 
-        AND courses.user_id = auth.uid()
+        WHERE courses.user_id = auth.uid()
     )
 );
 
