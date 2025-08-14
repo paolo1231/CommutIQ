@@ -37,8 +37,25 @@ export interface Course {
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   is_premium: boolean;
   created_at: string;
+  pre_generated_course_id?: string; // Link to pre-generated course for free users
   subject?: Subject; // joined data
   lessons?: Lesson[]; // joined data
+}
+
+export interface PreGeneratedCourse {
+  id: string;
+  title: string;
+  subject_id: string;
+  total_lessons: number;
+  estimated_duration: number; // total minutes
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  commute_time: number; // target commute time in minutes
+  is_premium: boolean;
+  description: string;
+  tags: string[];
+  created_at: string;
+  subject?: Subject; // joined data
+  lessons?: PreGeneratedLesson[]; // joined data
 }
 
 export interface Lesson {
@@ -50,6 +67,32 @@ export interface Lesson {
   duration: number; // minutes
   transcript: string;
   lesson_order: number;
+  created_at: string;
+}
+
+export interface PreGeneratedLesson {
+  id: string;
+  course_id: string;
+  title: string;
+  content: string; // AI-generated content
+  duration: number; // minutes
+  transcript: string;
+  lesson_order: number;
+  topic: string;
+  objectives: string[];
+  key_concepts: string[];
+  created_at: string;
+  interactions?: PreGeneratedLessonInteraction[]; // joined data
+}
+
+export interface PreGeneratedLessonInteraction {
+  id: string;
+  lesson_id: string;
+  type: 'quiz' | 'reflection' | 'practice';
+  prompt: string;
+  options?: string[];
+  correct_answer?: string;
+  interaction_order: number;
   created_at: string;
 }
 

@@ -7,6 +7,7 @@ import {
     OpenAIResponse,
     Subject,
 } from '../types';
+
 import { supabaseService } from './supabaseService';
 
 /**
@@ -102,37 +103,30 @@ export class ContentGenerationService {
         const response = await this.callOpenAI(prompt, OPENAI_CONFIG.MAX_TOKENS.COURSE_GENERATION);
 
         try {
-            const courseStructure = JSON.parse(response);
+            const cleanedResponse = this.extractJsonFromMarkdown(response);
+            const courseStructure = JSON.parse(cleanedResponse);
             return this.validateCourseStructure(courseStructure);
         } catch (error) {
             console.error('Failed to parse course structure:', error);
+            console.error('Raw response:', response);
             throw new Error('Invalid course structure generated');
         }
     }
 
     /**
-     * Generate and save a single lesson with content and audio
+     * Generate and save a single lesson with content (text-only, no audio file)
      */
     async generateAndSaveLesson(courseId: string, request: LessonGenerationRequest): Promise<Lesson> {
         try {
             // Generate lesson content
             const lessonContent = await this.generateLessonContent(request);
 
-            // Generate audio from transcript
-            const audioBuffer = await this.generateAudio(lessonContent.transcript);
-
-            // Upload audio to storage
-            const audioUrl = await this.uploadAudioToStorage(
-                audioBuffer,
-                `${courseId}/lesson_${request.lesson_order}.mp3`
-            );
-
-            // Save lesson to database
+            // Save lesson to database (no audio_url needed)
             const lessonResponse = await supabaseService.createLesson({
                 course_id: courseId,
                 title: lessonContent.title,
                 content: lessonContent.content,
-                audio_url: audioUrl,
+                audio_url: null, // No pre-generated audio file
                 duration: request.duration,
                 transcript: lessonContent.transcript,
                 lesson_order: request.lesson_order,
@@ -168,7 +162,7 @@ export class ContentGenerationService {
     /**
      * Generate lesson content using OpenAI GPT-4
      */
-    private async generateLessonContent(request: LessonGenerationRequest): Promise<{
+    async generateLessonContent(request: LessonGenerationRequest): Promise<{
         title: string;
         content: string;
         transcript: string;
@@ -185,72 +179,34 @@ export class ContentGenerationService {
         const response = await this.callOpenAI(prompt, OPENAI_CONFIG.MAX_TOKENS.LESSON_GENERATION);
 
         try {
-            const lessonContent = JSON.parse(response);
+            const cleanedResponse = this.extractJsonFromMarkdown(response);
+            const lessonContent = JSON.parse(cleanedResponse);
             return this.validateLessonContent(lessonContent);
         } catch (error) {
             console.error('Failed to parse lesson content:', error);
+            console.error('Raw response:', response);
             throw new Error('Invalid lesson content generated');
         }
     }
 
     /**
-     * Generate audio using OpenAI TTS API
+     * Extract JSON content from markdown code blocks
      */
-    async generateAudio(text: string, voice: string = 'alloy'): Promise<Buffer> {
-        try {
-            const response = await fetch(`${this.baseUrl}/audio/speech`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.apiKey}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    model: OPENAI_CONFIG.MODELS.TTS,
-                    input: text,
-                    voice: voice,
-                    response_format: 'mp3',
-                    speed: 1.0,
-                }),
-            });
-
-            if (!response.ok) {
-                throw new Error(`TTS API error: ${response.status} ${response.statusText}`);
-            }
-
-            const arrayBuffer = await response.arrayBuffer();
-            return Buffer.from(arrayBuffer);
-        } catch (error) {
-            console.error('Audio generation failed:', error);
-            throw new Error('Failed to generate audio. Please try again.');
+    extractJsonFromMarkdown(response: string): string {
+        // Remove markdown code block formatting if present
+        const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (jsonMatch) {
+            return jsonMatch[1].trim();
         }
-    }
 
-    /**
-     * Upload audio buffer to Supabase Storage
-     */
-    private async uploadAudioToStorage(audioBuffer: Buffer, path: string): Promise<string> {
-        try {
-            // Use the supabaseService uploadAudio method instead of direct access
-            const uploadResponse = await supabaseService.uploadAudio(audioBuffer, path, {
-                bucket: 'lesson-audio',
-                contentType: 'audio/mpeg',
-            });
-
-            if (uploadResponse.error || !uploadResponse.data) {
-                throw new Error(uploadResponse.error || 'Failed to upload audio');
-            }
-
-            return uploadResponse.data;
-        } catch (error) {
-            console.error('Audio upload failed:', error);
-            throw new Error('Failed to upload audio file');
-        }
+        // If no code blocks found, return the response as-is
+        return response.trim();
     }
 
     /**
      * Make API call to OpenAI GPT-4
      */
-    private async callOpenAI(prompt: string, maxTokens: number): Promise<string> {
+    async callOpenAI(prompt: string, maxTokens: number): Promise<string> {
         try {
             const response = await fetch(`${this.baseUrl}/chat/completions`, {
                 method: 'POST',
@@ -285,7 +241,21 @@ export class ContentGenerationService {
                 throw new Error('No response from OpenAI API');
             }
 
-            return data.choices[0].message.content;
+            const content = data.choices[0].message.content;
+
+            // Check if content is empty or null
+            if (!content || content.trim() === '') {
+                console.error('OpenAI API returned empty content:', data);
+                throw new Error('OpenAI API returned empty content. This may be due to token limits or content filtering.');
+            }
+
+            // Check if the response was truncated due to length
+            if (data.choices[0].finish_reason === 'length') {
+                console.warn('OpenAI response was truncated due to token limit');
+                throw new Error('Response was truncated due to token limit. Please try with a shorter prompt or increase max_completion_tokens.');
+            }
+
+            return content;
         } catch (error) {
             console.error('OpenAI API call failed:', error);
             throw new Error('Failed to generate content. Please try again.');
@@ -561,37 +531,86 @@ Make the transcript sound natural when spoken aloud, with appropriate pacing for
     }
 
     /**
-     * Regenerate lesson audio if needed
+     * Generate streaming audio URL for real-time playback (no file storage)
      */
-    async regenerateLessonAudio(lessonId: string, voice?: string): Promise<string> {
-        try {
-            const lessonResponse = await supabaseService.getLessonById(lessonId);
-            if (lessonResponse.error || !lessonResponse.data) {
-                throw new Error(lessonResponse.error || 'Lesson not found');
-            }
+    async generateStreamingAudioUrl(text: string, voice: string = 'sage'): Promise<string> {
+        // Use Supabase Edge Function for TTS streaming
+        const supabaseUrl = ENV.SUPABASE_URL;
+        const supabaseAnonKey = ENV.SUPABASE_ANON_KEY;
 
-            const lesson = lessonResponse.data;
-
-            // Generate new audio
-            const audioBuffer = await this.generateAudio(lesson.transcript, voice);
-
-            // Upload to storage
-            const audioUrl = await this.uploadAudioToStorage(
-                audioBuffer,
-                `${lesson.course_id}/lesson_${lesson.lesson_order}_v2.mp3`
-            );
-
-            // Update lesson with new audio URL
-            const updateResponse = await supabaseService.updateLesson(lessonId, { audio_url: audioUrl });
-            if (updateResponse.error) {
-                throw new Error(updateResponse.error);
-            }
-
-            return audioUrl;
-        } catch (error) {
-            console.error('Audio regeneration failed:', error);
-            throw new Error('Failed to regenerate audio');
+        if (!supabaseUrl || !supabaseAnonKey) {
+            throw new Error('Supabase configuration missing');
         }
+
+        const response = await fetch(`${supabaseUrl}/functions/v1/tts-stream`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${supabaseAnonKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                text: text,
+                voice: voice,
+                speed: 1.0,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(`TTS streaming failed: ${errorData.error || response.statusText}`);
+        }
+
+        // Return blob URL for immediate playback
+        const audioBlob = await response.blob();
+        return URL.createObjectURL(audioBlob);
+    }
+
+    /**
+     * Use browser's built-in Speech Synthesis API (client-side TTS)
+     */
+    generateClientSideTTS(text: string, options?: {
+        voice?: string;
+        rate?: number;
+        pitch?: number;
+        volume?: number;
+    }): Promise<void> {
+        return new Promise((resolve, reject) => {
+            if (!('speechSynthesis' in window)) {
+                reject(new Error('Speech synthesis not supported in this browser'));
+                return;
+            }
+
+            const utterance = new SpeechSynthesisUtterance(text);
+
+            // Set options
+            if (options?.rate) utterance.rate = options.rate;
+            if (options?.pitch) utterance.pitch = options.pitch;
+            if (options?.volume) utterance.volume = options.volume;
+
+            // Find voice if specified
+            if (options?.voice) {
+                const voices = speechSynthesis.getVoices();
+                const selectedVoice = voices.find(voice =>
+                    voice.name.toLowerCase().includes(options.voice!.toLowerCase())
+                );
+                if (selectedVoice) utterance.voice = selectedVoice;
+            }
+
+            utterance.onend = () => resolve();
+            utterance.onerror = (event) => reject(new Error(`Speech synthesis error: ${event.error}`));
+
+            speechSynthesis.speak(utterance);
+        });
+    }
+
+    /**
+     * Get available voices for client-side TTS
+     */
+    getAvailableVoices(): SpeechSynthesisVoice[] {
+        if (!('speechSynthesis' in window)) {
+            return [];
+        }
+        return speechSynthesis.getVoices();
     }
 }
 

@@ -104,9 +104,9 @@
     - Add lesson content optimization for audio consumption
     - _Requirements: 3.1, 3.2, 3.3_
 
-  - [ ] 5.3 Integrate OpenAI TTS for audio generation
+  - [x] 5.3 Integrate OpenAI TTS for audio generation
     - Implement text-to-speech conversion using OpenAI TTS API
-    - Add audio file upload to Supabase Storage
+    - Add audio file upload to S3 Storage using dedicated StorageService
     - Create audio quality management and compression
     - Handle TTS errors and fallback mechanisms
     - _Requirements: 3.1, 3.2, 5.1_
