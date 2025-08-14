@@ -15,7 +15,10 @@ export const ENV = {
 };
 
 // Debug environment variables (only in development)
-if (__DEV__) {
+// Check for both React Native __DEV__ and Node.js development environment
+const isDevelopment = (typeof __DEV__ !== 'undefined' && __DEV__) || process.env.NODE_ENV === 'development';
+
+if (isDevelopment) {
   console.log('Environment Variables Loaded:');
   console.log('SUPABASE_URL:', ENV.SUPABASE_URL ? 'SET' : 'NOT SET');
   console.log('SUPABASE_ANON_KEY:', ENV.SUPABASE_ANON_KEY ? 'SET' : 'NOT SET');
@@ -296,7 +299,7 @@ export const API_ENDPOINTS = {
 export const OPENAI_CONFIG = {
   API_URL: 'https://api.openai.com/v1',
   MODELS: {
-    CHAT: 'gpt-5-nano',
+    CHAT: 'gpt-4o-mini',
     TTS: 'tts-1',
   },
   TTS_VOICES: [
@@ -308,11 +311,11 @@ export const OPENAI_CONFIG = {
     'shimmer',
   ],
   MAX_TOKENS: {
-    COURSE_GENERATION: 2000,
-    LESSON_GENERATION: 1500,
-    INTERACTION_GENERATION: 500,
+    COURSE_GENERATION: 4000,
+    LESSON_GENERATION: 3000,
+    INTERACTION_GENERATION: 1000,
   },
-  TEMPERATURE: 0.7,
+  TEMPERATURE: 1,
   REQUEST_TIMEOUT: 30000, // 30 seconds
 };
 

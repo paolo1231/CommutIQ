@@ -505,123 +505,6 @@ export class SupabaseService {
     }
   }
 
-  // Storage Operations
-  async uploadAudio(
-    audioBuffer: ArrayBuffer,
-    path: string,
-    options: {
-      bucket?: string;
-      quality?: 'standard' | 'high';
-      contentType?: string;
-      metadata?: Record<string, any>;
-    } = {}
-  ): Promise<APIResponse<string>> {
-    try {
-      const {
-        bucket = 'lesson-audio',
-        quality = 'standard',
-        contentType = 'audio/mpeg',
-        metadata = {}
-      } = options;
-
-      // Add quality and upload metadata
-      const uploadMetadata = {
-        quality,
-        uploaded_at: new Date().toISOString(),
-        size: audioBuffer.byteLength,
-        ...metadata
-      };
-
-      const { data, error } = await this.supabase.storage
-        .from(bucket)
-        .upload(path, audioBuffer, {
-          contentType,
-          upsert: true,
-          metadata: uploadMetadata,
-        });
-
-      if (error) throw error;
-
-      const { data: { publicUrl } } = this.supabase.storage
-        .from(bucket)
-        .getPublicUrl(path);
-
-      return { data: publicUrl };
-    } catch (error) {
-      console.error('Upload Audio Error:', error);
-      return { error: error.message };
-    }
-  }
-
-  async downloadAudio(path: string, bucket: string = 'lesson-audio'): Promise<APIResponse<ArrayBuffer>> {
-    try {
-      const { data, error } = await this.supabase.storage
-        .from(bucket)
-        .download(path);
-
-      if (error) throw error;
-      return { data: await data.arrayBuffer() };
-    } catch (error) {
-      console.error('Download Audio Error:', error);
-      return { error: error.message };
-    }
-  }
-
-  async getAudioUrl(path: string, bucket: string = 'lesson-audio'): Promise<APIResponse<string>> {
-    try {
-      const { data: { publicUrl } } = this.supabase.storage
-        .from(bucket)
-        .getPublicUrl(path);
-
-      return { data: publicUrl };
-    } catch (error) {
-      console.error('Get Audio URL Error:', error);
-      return { error: error.message };
-    }
-  }
-
-  async deleteAudio(path: string, bucket: string = 'lesson-audio'): Promise<APIResponse<boolean>> {
-    try {
-      const { error } = await this.supabase.storage
-        .from(bucket)
-        .remove([path]);
-
-      if (error) throw error;
-      return { data: true };
-    } catch (error) {
-      console.error('Delete Audio Error:', error);
-      return { error: error.message };
-    }
-  }
-
-  async listAudioFiles(
-    folder: string = '',
-    bucket: string = 'lesson-audio',
-    options: {
-      limit?: number;
-      offset?: number;
-      sortBy?: { column: string; order: 'asc' | 'desc' };
-    } = {}
-  ): Promise<APIResponse<any[]>> {
-    try {
-      const { limit = 100, offset = 0, sortBy } = options;
-
-      const { data, error } = await this.supabase.storage
-        .from(bucket)
-        .list(folder, {
-          limit,
-          offset,
-          sortBy,
-        });
-
-      if (error) throw error;
-      return { data };
-    } catch (error) {
-      console.error('List Audio Files Error:', error);
-      return { error: error.message };
-    }
-  }
-
   async getStorageStats(userId?: string): Promise<APIResponse<any>> {
     try {
       const { data, error } = await this.supabase.rpc('get_storage_stats', {
@@ -823,6 +706,169 @@ export class SupabaseService {
   // Get Supabase client for direct access if needed
   getClient(): SupabaseClient {
     return this.supabase;
+  }
+  // Pre-Generated Content Operations
+  async createPreGeneratedCourse(courseData: {
+    title: string;
+    subject_id: string;
+    total_lessons: number;
+    estimated_duration: number;
+    difficulty: 'beginner' | 'intermediate' | 'advanced';
+    commute_time: number;
+    is_premium: boolean;
+    description: string;
+    tags: string[];
+  }): Promise<APIResponse<any>> {
+    try {
+      const { data, error } = await this.supabase
+        .from('pre_generated_courses')
+        .insert([courseData])
+        .select()
+        .single();
+
+      if (error) throw error;
+      return { data };
+    } catch (error) {
+      console.error('Create Pre-Generated Course Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async createPreGeneratedLesson(lessonData: {
+    course_id: string;
+    title: string;
+    content: string;
+    duration: number;
+    transcript: string;
+    lesson_order: number;
+    topic: string;
+    objectives: string[];
+    key_concepts: string[];
+  }): Promise<APIResponse<any>> {
+    try {
+      const { data, error } = await this.supabase
+        .from('pre_generated_lessons')
+        .insert([lessonData])
+        .select()
+        .single();
+
+      if (error) throw error;
+      return { data };
+    } catch (error) {
+      console.error('Create Pre-Generated Lesson Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async createPreGeneratedLessonInteraction(interactionData: {
+    lesson_id: string;
+    type: 'quiz' | 'reflection' | 'practice';
+    prompt: string;
+    options?: string[];
+    correct_answer?: string;
+    interaction_order: number;
+  }): Promise<APIResponse<any>> {
+    try {
+      const { data, error } = await this.supabase
+        .from('pre_generated_lesson_interactions')
+        .insert([interactionData])
+        .select()
+        .single();
+
+      if (error) throw error;
+      return { data };
+    } catch (error) {
+      console.error('Create Pre-Generated Lesson Interaction Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async getPreGeneratedCourses(filters: {
+    subject_id?: string;
+    commute_time?: number;
+    difficulty?: 'beginner' | 'intermediate' | 'advanced';
+  }): Promise<APIResponse<any[]>> {
+    try {
+      let query = this.supabase
+        .from('pre_generated_courses')
+        .select(`
+          *,
+          subject:subjects(*)
+        `);
+
+      if (filters.subject_id) {
+        query = query.eq('subject_id', filters.subject_id);
+      }
+      if (filters.commute_time) {
+        query = query.eq('commute_time', filters.commute_time);
+      }
+      if (filters.difficulty) {
+        query = query.eq('difficulty', filters.difficulty);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return { data };
+    } catch (error) {
+      console.error('Get Pre-Generated Courses Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async getPreGeneratedCourseById(courseId: string): Promise<any> {
+    try {
+      const { data, error } = await this.supabase
+        .from('pre_generated_courses')
+        .select(`
+          *,
+          subject:subjects(*)
+        `)
+        .eq('id', courseId)
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Get Pre-Generated Course By ID Error:', error);
+      return null;
+    }
+  }
+
+  async getPreGeneratedCourseLessons(courseId: string): Promise<APIResponse<any[]>> {
+    try {
+      const { data, error } = await this.supabase
+        .from('pre_generated_lessons')
+        .select(`
+          *,
+          interactions:pre_generated_lesson_interactions(*)
+        `)
+        .eq('course_id', courseId)
+        .order('lesson_order', { ascending: true });
+
+      if (error) throw error;
+      return { data };
+    } catch (error) {
+      console.error('Get Pre-Generated Course Lessons Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async getPopularSubjects(limit: number = 10): Promise<any[]> {
+    try {
+      const { data, error } = await this.supabase
+        .from('subjects')
+        .select('*')
+        .eq('is_premium', false) // Focus on free subjects first
+        .order('created_at', { ascending: true })
+        .limit(limit);
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Get Popular Subjects Error:', error);
+      return [];
+    }
   }
 }
 

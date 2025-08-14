@@ -31,7 +31,6 @@ export const Onboarding: React.FC<OnboardingProps> = ({ userId, onComplete }) =>
       // Update profile
       const result = await supabaseService.updateUserProfile(userId, {
         commute_time: commuteTime,
-        subscription_tier: 'free',
         preferences: defaultPreferences,
         last_active_at: new Date().toISOString(),
       });

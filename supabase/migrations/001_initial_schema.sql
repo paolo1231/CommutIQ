@@ -292,10 +292,17 @@ CREATE POLICY "Users can view interactions for their lessons"
 ON lesson_interactions FOR SELECT 
 USING (
     EXISTS (
-        SELECT 1 FROM lessons l
-        JOIN courses c ON c.id = l.course_id
-        WHERE l.id = lesson_interactions.lesson_id 
-        AND c.user_id = auth.uid()
+        SELECT 1 FROM courses 
+        WHERE courses.user_id = auth.uid()
+    )
+);
+
+CREATE POLICY "Users can insert interactions for their lessons" 
+ON lesson_interactions FOR INSERT 
+WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM courses 
+        WHERE courses.user_id = auth.uid()
     )
 );
 
