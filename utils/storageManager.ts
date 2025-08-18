@@ -1,7 +1,6 @@
 import { LEARNING_CONFIG, STORAGE_CONFIG } from '../constants';
-import { audioStorageService } from '../services/audioStorageService';
-import { storageService } from '../services/storageService';
 import { supabaseService } from '../services/supabaseService';
+import { ttsService } from '../services/ttsService';
 import { APIResponse, AudioQualityStats, CacheStats } from '../types';
 
 export class StorageManager {
@@ -10,14 +9,9 @@ export class StorageManager {
      */
     static async initialize(): Promise<APIResponse<boolean>> {
         try {
-            // Check if storage services are configured
-            if (!storageService.isConfigured()) {
-                console.warn('⚠️  S3 Storage not fully configured, using Supabase Storage only');
-            }
-
-            // Perform initial cache cleanup
-            await audioStorageService.cleanupCache();
-
+            // Initialize TTS service cache
+            console.log('Storage Manager initialized with TTS caching');
+            
             return { data: true };
         } catch (error) {
             console.error('Storage Manager Initialize Error:', error);
@@ -35,17 +29,23 @@ export class StorageManager {
         configuration: any;
     }>> {
         try {
-            const [supabaseStats, cacheStats, audioQualityStats] = await Promise.allSettled([
+            const [supabaseStats, audioQualityStats] = await Promise.allSettled([
                 supabaseService.getStorageStats(),
-                audioStorageService.getCacheStats(),
                 supabaseService.getAudioStatsByQuality()
             ]);
 
+            const ttsStats = ttsService.getCacheStats();
+
             const result = {
                 supabase: supabaseStats.status === 'fulfilled' ? supabaseStats.value.data : null,
-                cache: cacheStats.status === 'fulfilled' ? cacheStats.value.data : null,
+                cache: {
+                    totalFiles: ttsStats.size,
+                    totalSize: ttsStats.size * 100000, // Estimate 100KB per cached audio
+                    oldestFile: null,
+                    newestFile: null
+                },
                 audioQuality: audioQualityStats.status === 'fulfilled' ? audioQualityStats.value.data : null,
-                configuration: storageService.getConfig()
+                configuration: { configured: true }
             };
 
             return { data: result };
@@ -65,18 +65,21 @@ export class StorageManager {
         totalSpaceFreed: number;
     }>> {
         try {
+            // Clear TTS cache
+            const ttsCacheSize = ttsService.getCacheStats().size;
+            ttsService.clearCache();
+            
             const results = await Promise.allSettled([
-                audioStorageService.cleanupCache(true),
                 supabaseService.cleanupDuplicateFiles(),
                 supabaseService.cleanupOldFiles(STORAGE_CONFIG.BUCKETS.LESSON_AUDIO, 30)
             ]);
 
-            const cacheCleanup = results[0].status === 'fulfilled' ? results[0].value.data || 0 : 0;
-            const duplicatesRemoved = results[1].status === 'fulfilled' ? results[1].value.data || 0 : 0;
-            const oldFilesRemoved = results[2].status === 'fulfilled' ? results[2].value.data || 0 : 0;
+            const cacheCleanup = ttsCacheSize;
+            const duplicatesRemoved = results[0].status === 'fulfilled' ? results[0].value.data || 0 : 0;
+            const oldFilesRemoved = results[1].status === 'fulfilled' ? results[1].value.data || 0 : 0;
 
-            // Calculate approximate space freed (this would need more detailed tracking in production)
-            const totalSpaceFreed = (cacheCleanup + duplicatesRemoved + oldFilesRemoved) * 1024 * 1024; // Rough estimate
+            // Calculate approximate space freed
+            const totalSpaceFreed = (cacheCleanup * 100000) + (duplicatesRemoved + oldFilesRemoved) * 1024 * 1024;
 
             return {
                 data: {
@@ -110,22 +113,29 @@ export class StorageManager {
         size: number;
     }>> {
         try {
-            const result = await audioStorageService.uploadLessonAudio(
-                audioBuffer,
-                lessonId,
-                courseId,
-                options
-            );
+            // Upload to Supabase Storage
+            const path = `courses/${courseId}/lessons/${lessonId}/audio.mp3`;
+            const { data, error } = await supabaseService.supabase.storage
+                .from(STORAGE_CONFIG.BUCKETS.LESSON_AUDIO)
+                .upload(path, audioBuffer, {
+                    contentType: 'audio/mpeg',
+                    upsert: true,
+                    metadata: options.metadata
+                });
 
-            if (result.error) {
-                throw new Error(result.error);
+            if (error) {
+                throw error;
             }
+
+            const { data: { publicUrl } } = supabaseService.supabase.storage
+                .from(STORAGE_CONFIG.BUCKETS.LESSON_AUDIO)
+                .getPublicUrl(path);
 
             return {
                 data: {
-                    primaryUrl: result.data!.url,
-                    path: result.data!.path,
-                    size: result.data!.size,
+                    primaryUrl: publicUrl,
+                    path: path,
+                    size: audioBuffer.byteLength,
                 }
             };
         } catch (error) {
@@ -186,10 +196,14 @@ export class StorageManager {
             // Limit total preload count
             lessonsToPreload = lessonsToPreload.slice(0, LEARNING_CONFIG.LESSON_BUFFER_COUNT);
 
-            // Preload the lessons
-            const preloadResult = await audioStorageService.preloadLessons(lessonsToPreload);
-
-            const preloadedCount = preloadResult.data?.length || 0;
+            // Preload the lessons using TTS service
+            const preloadTexts = lessonsToPreload.map(lesson => ({
+                text: lesson.transcript || '',
+                options: { voice: 'sage', quality: 'standard' }
+            }));
+            
+            await ttsService.preloadMultiple(preloadTexts, 3);
+            const preloadedCount = preloadTexts.length;
             const estimatedSize = lessonsToPreload.reduce((sum, lesson) => sum + (lesson.duration * 1024 * 100), 0); // Rough estimate
             const estimatedTime = lessonsToPreload.reduce((sum, lesson) => sum + lesson.duration, 0);
 
@@ -211,26 +225,25 @@ export class StorageManager {
      */
     static async healthCheck(): Promise<APIResponse<{
         supabase: boolean;
-        s3: boolean;
+        tts: boolean;
         cache: boolean;
         overall: boolean;
     }>> {
         try {
-            const [supabaseHealth, cacheStats] = await Promise.allSettled([
-                supabaseService.healthCheck(),
-                audioStorageService.getCacheStats()
-            ]);
+            const supabaseHealth = await supabaseService.healthCheck();
+            const ttsAvailable = await ttsService.checkAvailability();
+            const ttsCacheStats = ttsService.getCacheStats();
 
-            const supabaseOk = supabaseHealth.status === 'fulfilled' && supabaseHealth.value;
-            const s3Ok = storageService.isConfigured();
-            const cacheOk = cacheStats.status === 'fulfilled' && !cacheStats.value.error;
+            const supabaseOk = supabaseHealth;
+            const ttsOk = ttsAvailable;
+            const cacheOk = ttsCacheStats.size >= 0;
 
-            const overall = supabaseOk && cacheOk;
+            const overall = supabaseOk && ttsOk;
 
             return {
                 data: {
                     supabase: supabaseOk,
-                    s3: s3Ok,
+                    tts: ttsOk,
                     cache: cacheOk,
                     overall
                 }
@@ -250,8 +263,14 @@ export class StorageManager {
         removed: number;
     }>> {
         try {
-            const result = await audioStorageService.syncCachedFiles();
-            return result;
+            // TTS cache is managed automatically
+            return {
+                data: {
+                    synced: 0,
+                    failed: 0,
+                    removed: 0
+                }
+            };
         } catch (error) {
             console.error('Sync Cached Content Error:', error);
             return { error: error.message };

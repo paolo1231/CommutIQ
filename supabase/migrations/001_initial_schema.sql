@@ -71,48 +71,9 @@ CREATE TABLE lessons (
     UNIQUE(course_id, lesson_order)
 );
 
--- User progress table
-CREATE TABLE user_progress (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
-    lesson_id UUID NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
-    progress_percentage DECIMAL(5,2) NOT NULL DEFAULT 0 CHECK (progress_percentage >= 0 AND progress_percentage <= 100),
-    completed_at TIMESTAMPTZ,
-    last_position_seconds INTEGER DEFAULT 0,
-    play_count INTEGER DEFAULT 0,
-    total_time_spent INTEGER DEFAULT 0, -- in seconds
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(user_id, lesson_id)
-);
+-- Removed user_progress table - no longer tracking lesson progress
 
--- Lesson interactions table
-CREATE TABLE lesson_interactions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    lesson_id UUID NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
-    type TEXT NOT NULL CHECK (type IN ('quiz', 'reflection', 'discussion')),
-    title TEXT NOT NULL,
-    content JSONB NOT NULL,
-    position_seconds INTEGER NOT NULL DEFAULT 0,
-    is_required BOOLEAN NOT NULL DEFAULT false,
-    metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- User interaction responses table
-CREATE TABLE user_interaction_responses (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
-    interaction_id UUID NOT NULL REFERENCES lesson_interactions(id) ON DELETE CASCADE,
-    response JSONB NOT NULL,
-    completed_at TIMESTAMPTZ DEFAULT NOW(),
-    score DECIMAL(5,2),
-    metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(user_id, interaction_id)
-);
+-- Removed lesson_interactions and user_interaction_responses tables - simplified lesson experience
 
 -- Analytics events table (for future use)
 CREATE TABLE analytics_events (
@@ -274,44 +235,12 @@ TO authenticated
 USING (
     EXISTS (
         SELECT 1 FROM courses 
-        WHERE courses.user_id = auth.uid()
+        WHERE courses.id = lessons.course_id 
+        AND courses.user_id = auth.uid()
     )
 );
 
--- User progress
-ALTER TABLE user_progress ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can manage their own progress" 
-ON user_progress FOR ALL 
-USING (auth.uid() = user_id);
-
--- Lesson interactions
-ALTER TABLE lesson_interactions ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view interactions for their lessons" 
-ON lesson_interactions FOR SELECT 
-USING (
-    EXISTS (
-        SELECT 1 FROM courses 
-        WHERE courses.user_id = auth.uid()
-    )
-);
-
-CREATE POLICY "Users can insert interactions for their lessons" 
-ON lesson_interactions FOR INSERT 
-WITH CHECK (
-    EXISTS (
-        SELECT 1 FROM courses 
-        WHERE courses.user_id = auth.uid()
-    )
-);
-
--- User interaction responses
-ALTER TABLE user_interaction_responses ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can manage their own responses" 
-ON user_interaction_responses FOR ALL 
-USING (auth.uid() = user_id);
+-- Removed RLS policies for user_progress, lesson_interactions, and user_interaction_responses
 
 -- Analytics events
 ALTER TABLE analytics_events ENABLE ROW LEVEL SECURITY;
@@ -353,17 +282,7 @@ CREATE TRIGGER update_lessons_updated_at
     BEFORE UPDATE ON lessons 
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_user_progress_updated_at 
-    BEFORE UPDATE ON user_progress 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_lesson_interactions_updated_at 
-    BEFORE UPDATE ON lesson_interactions 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_user_interaction_responses_updated_at 
-    BEFORE UPDATE ON user_interaction_responses 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- Removed triggers for user_progress, lesson_interactions, and user_interaction_responses
 
 -- Indexes for performance
 CREATE INDEX idx_user_subjects_user_id ON user_subjects(user_id);
@@ -372,37 +291,13 @@ CREATE INDEX idx_courses_user_id ON courses(user_id);
 CREATE INDEX idx_courses_subject_id ON courses(subject_id);
 CREATE INDEX idx_lessons_course_id ON lessons(course_id);
 CREATE INDEX idx_lessons_order ON lessons(course_id, lesson_order);
-CREATE INDEX idx_user_progress_user_id ON user_progress(user_id);
-CREATE INDEX idx_user_progress_lesson_id ON user_progress(lesson_id);
-CREATE INDEX idx_user_progress_completed ON user_progress(user_id, completed_at) WHERE completed_at IS NOT NULL;
-CREATE INDEX idx_lesson_interactions_lesson_id ON lesson_interactions(lesson_id);
-CREATE INDEX idx_user_interaction_responses_user_id ON user_interaction_responses(user_id);
+-- Removed indexes for user_progress, lesson_interactions, and user_interaction_responses
 CREATE INDEX idx_analytics_events_user_id ON analytics_events(user_id);
 CREATE INDEX idx_analytics_events_created_at ON analytics_events(created_at);
 CREATE INDEX idx_sync_queue_user_id ON sync_queue(user_id);
 CREATE INDEX idx_sync_queue_unsynced ON sync_queue(user_id, synced) WHERE NOT synced;
 
--- Helper functions
-CREATE OR REPLACE FUNCTION get_user_course_progress(user_uuid UUID, course_uuid UUID)
-RETURNS TABLE (
-    total_lessons INTEGER,
-    completed_lessons INTEGER,
-    progress_percentage DECIMAL
-) AS $$
-BEGIN
-    RETURN QUERY
-    SELECT 
-        COUNT(*)::INTEGER as total_lessons,
-        COUNT(CASE WHEN up.completed_at IS NOT NULL THEN 1 END)::INTEGER as completed_lessons,
-        ROUND(
-            (COUNT(CASE WHEN up.completed_at IS NOT NULL THEN 1 END)::DECIMAL / 
-             NULLIF(COUNT(*)::DECIMAL, 0)) * 100, 2
-        ) as progress_percentage
-    FROM lessons l
-    LEFT JOIN user_progress up ON l.id = up.lesson_id AND up.user_id = user_uuid
-    WHERE l.course_id = course_uuid;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+-- Removed get_user_course_progress function - no longer tracking progress
 
 -- Function to get storage statistics
 CREATE OR REPLACE FUNCTION get_storage_stats(user_id UUID DEFAULT NULL)
@@ -469,7 +364,6 @@ BEGIN
         jsonb_build_object(
             'audioSpeed', 1.0,
             'autoPlay', true,
-            'downloadQuality', 'standard',
             'notificationsEnabled', true,
             'backgroundPlayback', true
         )

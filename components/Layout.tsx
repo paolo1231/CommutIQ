@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, StatusBar } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, StatusBar, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { PricingModal } from './PricingModal';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -9,10 +10,12 @@ interface LayoutProps {
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [showPricing, setShowPricing] = useState(false);
+  const insets = useSafeAreaInsets();
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#4f46e5" />
+      <View style={[styles.statusBarBackground, { height: insets.top }]} />
       <View style={styles.header}>
         <View style={styles.headerContent}>
           <View style={styles.logoSection}>
@@ -32,7 +35,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         {children}
       </View>
       {showPricing && <PricingModal onClose={() => setShowPricing(false)} />}
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -40,6 +43,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8fafc',
+  },
+  statusBarBackground: {
+    backgroundColor: '#4f46e5',
   },
   header: {
     backgroundColor: '#4f46e5',

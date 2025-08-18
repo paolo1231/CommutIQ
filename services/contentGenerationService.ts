@@ -126,7 +126,6 @@ export class ContentGenerationService {
                 course_id: courseId,
                 title: lessonContent.title,
                 content: lessonContent.content,
-                audio_url: null, // No pre-generated audio file
                 duration: request.duration,
                 transcript: lessonContent.transcript,
                 lesson_order: request.lesson_order,
@@ -532,37 +531,12 @@ Make the transcript sound natural when spoken aloud, with appropriate pacing for
 
     /**
      * Generate streaming audio URL for real-time playback (no file storage)
+     * @deprecated Use ttsService.generateAudio() instead
      */
     async generateStreamingAudioUrl(text: string, voice: string = 'sage'): Promise<string> {
-        // Use Supabase Edge Function for TTS streaming
-        const supabaseUrl = ENV.SUPABASE_URL;
-        const supabaseAnonKey = ENV.SUPABASE_ANON_KEY;
-
-        if (!supabaseUrl || !supabaseAnonKey) {
-            throw new Error('Supabase configuration missing');
-        }
-
-        const response = await fetch(`${supabaseUrl}/functions/v1/tts-stream`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${supabaseAnonKey}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                text: text,
-                voice: voice,
-                speed: 1.0,
-            }),
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(`TTS streaming failed: ${errorData.error || response.statusText}`);
-        }
-
-        // Return blob URL for immediate playback
-        const audioBlob = await response.blob();
-        return URL.createObjectURL(audioBlob);
+        // Delegate to the new TTS service
+        const { ttsService } = await import('./ttsService');
+        return ttsService.generateAudio(text, { voice });
     }
 
     /**
