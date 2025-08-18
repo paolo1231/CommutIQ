@@ -1,5 +1,4 @@
 import { contentGenerationService } from '@/services/contentGenerationService';
-import { freeUserContentService } from '@/services/freeUserContentService';
 import { showErrorAlert } from '@/utils/alertHelper';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
@@ -100,34 +99,25 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
       return;
     }
 
-    const isPremiumUser = profile.subscription_tier === 'premium';
-
-    // Start content setup
+    // Start content generation for all users
     setCurrentStep('generating');
     setGenerationProgress({ current: 0, total: selectedSubjects.length, currentSubject: '' });
 
     try {
-      if (isPremiumUser) {
-        // Premium users: Generate personalized courses in real-time
-        await handlePremiumUserSetup(selectedSubjects);
-      } else {
-        // Free users: Assign pre-generated courses
-        await handleFreeUserSetup(selectedSubjects);
-      }
+      // Generate courses for all users (both free and premium)
+      await handleCourseGeneration(selectedSubjects);
 
       // Complete onboarding
       onComplete(userId, selectedSubjects);
     } catch (error) {
       console.error('Content setup failed:', error);
-      const errorMessage = isPremiumUser
-        ? 'We encountered an issue generating your personalized courses. Don\'t worry - you can still access your learning content, and we\'ll continue generating courses in the background.'
-        : 'We encountered an issue setting up your courses. Don\'t worry - you can still access available courses from your dashboard.';
+      const errorMessage = 'We encountered an issue generating your courses. Don\'t worry - you can still access your learning content, and we\'ll continue generating courses in the background.';
 
       showErrorAlert(errorMessage, () => onComplete(userId, selectedSubjects));
     }
   };
 
-  const handlePremiumUserSetup = async (selectedSubjects: Subject[]) => {
+  const handleCourseGeneration = async (selectedSubjects: Subject[]) => {
     const generatedCourses = [];
 
     for (let i = 0; i < selectedSubjects.length; i++) {
@@ -139,7 +129,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
       });
 
       try {
-        console.log(`Generating personalized course for ${subject.name}...`);
+        console.log(`Generating course for ${subject.name}...`);
 
         const course = await contentGenerationService.generateCourse({
           subject_id: subject.id,
@@ -170,57 +160,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
       }
     }
 
-    console.log(`Premium course generation complete. Generated ${generatedCourses.length} courses.`);
-  };
-
-  const handleFreeUserSetup = async (selectedSubjects: Subject[]) => {
-    const assignedCourses = [];
-    const subjectIds = selectedSubjects.map(s => s.id);
-
-    // Get available pre-generated courses for the user's preferences
-    const freeUserContent = await freeUserContentService.getAvailableCoursesForFreeUser(
-      userId!,
-      subjectIds,
-      commuteTime,
-      'beginner'
-    );
-
-    // Assign the best matching pre-generated course for each subject
-    for (let i = 0; i < selectedSubjects.length; i++) {
-      const subject = selectedSubjects[i];
-      setGenerationProgress({
-        current: i + 1,
-        total: selectedSubjects.length,
-        currentSubject: subject.name
-      });
-
-      try {
-        // Find a pre-generated course for this subject
-        const availableCourse = freeUserContent.preGenerated.find(
-          course => course.subject_id === subject.id
-        );
-
-        if (availableCourse) {
-          console.log(`Assigning pre-generated course for ${subject.name}...`);
-
-          const userCourse = await freeUserContentService.enrollFreeUserInCourse(
-            userId!,
-            availableCourse.id
-          );
-
-          assignedCourses.push(userCourse);
-          console.log(`Successfully assigned course: ${availableCourse.title}`);
-        } else {
-          console.log(`No pre-generated course available for ${subject.name}`);
-          // Subject will still be saved in user_subjects, they can browse available courses later
-        }
-      } catch (error) {
-        console.error(`Failed to assign course for ${subject.name}:`, error);
-        // Continue with other subjects even if one fails
-      }
-    }
-
-    console.log(`Free user setup complete. Assigned ${assignedCourses.length} courses.`);
+    console.log(`Course generation complete. Generated ${generatedCourses.length} courses.`);
   };
 
   const renderCurrentStep = () => {
@@ -258,20 +198,15 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
         ) : null;
 
       case 'generating':
-        const isPremiumUser = userProfile?.subscription_tier === 'premium';
-
         return (
           <View style={styles.centerContainer}>
             <View style={styles.generationContainer}>
               <ActivityIndicator size="large" color={UI_CONFIG.COLORS.PRIMARY} />
               <Text style={styles.generationTitle}>
-                {isPremiumUser ? 'Creating Your Learning Experience' : 'Setting Up Your Courses'}
+                Creating Your Learning Experience
               </Text>
               <Text style={styles.generationSubtitle}>
-                {isPremiumUser
-                  ? 'We\'re generating personalized courses just for you...'
-                  : 'We\'re finding the best courses for your learning journey...'
-                }
+                We're generating personalized courses just for you...
               </Text>
 
               {generationProgress.currentSubject && (
@@ -280,10 +215,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
                     {generationProgress.current} of {generationProgress.total}
                   </Text>
                   <Text style={styles.currentSubjectText}>
-                    {isPremiumUser
-                      ? `Generating ${generationProgress.currentSubject} course`
-                      : `Setting up ${generationProgress.currentSubject} course`
-                    }
+                    Generating {generationProgress.currentSubject} course
                   </Text>
                 </View>
               )}
@@ -298,14 +230,6 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
                   ]}
                 />
               </View>
-
-              {!isPremiumUser && (
-                <View style={styles.freeUserNotice}>
-                  <Text style={styles.freeUserNoticeText}>
-                    💡 Upgrade to Premium for personalized AI-generated courses!
-                  </Text>
-                </View>
-              )}
             </View>
           </View>
         );

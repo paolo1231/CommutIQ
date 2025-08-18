@@ -154,7 +154,7 @@ backend = "postgres"
 
 [functions]
 # A list of up to 10 schemas that will be excluded from the generated types. `public` is excluded by default.
-excluded_schemas = []
+# excluded_schemas = []
 # Path to the import map file, if any.
 # import_map = "./functions/import_map.json"
 

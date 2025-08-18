@@ -17,11 +17,34 @@ export const AppNavigation = {
     }
   },
   toDashboard: () => router.replace('/dashboard'),
-  toLesson: (lessonId: string, courseId: string) => {
-    router.push({
-      pathname: '/lesson',
-      params: { lessonId, courseId }
-    });
+  toLesson: (lessonId: string, courseId?: string) => {
+    console.log('Navigation toLesson called with:', { lessonId, courseId });
+    
+    if (!lessonId || lessonId === 'undefined' || lessonId === 'null') {
+      console.error('Invalid lesson ID passed to navigation:', lessonId);
+      return;
+    }
+    
+    // Try using the direct path approach
+    const path = `/lesson/${lessonId}`;
+    const queryString = courseId ? `?courseId=${courseId}` : '';
+    const fullPath = `${path}${queryString}`;
+    
+    console.log('Navigating to lesson with path:', fullPath);
+    router.push(fullPath);
+  },
+  toCourse: (courseId: string) => {
+    console.log('Navigation toCourse called with:', courseId);
+    
+    if (!courseId || courseId === 'undefined' || courseId === 'null') {
+      console.error('Invalid course ID passed to navigation:', courseId);
+      return;
+    }
+    
+    // Use direct path
+    const path = `/course/${courseId}`;
+    console.log('Navigating to course with path:', path);
+    router.push(path);
   },
   toPremium: () => router.push('/premium'),
   toSettings: () => router.push('/settings'),

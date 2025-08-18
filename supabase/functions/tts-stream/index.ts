@@ -36,9 +36,14 @@ serve(async (req) => {
             )
         }
 
-        // Split text into chunks if it's too long
-        const maxChunkSize = 4000
-        const chunks = text.length <= maxChunkSize ? [text] : splitTextIntoChunks(text, maxChunkSize)
+        // Split text into chunks if it's too long (OpenAI limit is 4096)
+        const maxChunkSize = 4000 // Leave some buffer
+        const chunks = splitTextIntoChunks(text, maxChunkSize)
+        
+        console.log(`Text length: ${text.length}, Chunks created: ${chunks.length}`)
+        if (chunks.length > 1) {
+            console.log(`Chunk sizes: ${chunks.map(c => c.length).join(', ')}`)
+        }
 
         // If single chunk, stream directly
         if (chunks.length === 1) {
@@ -50,7 +55,7 @@ serve(async (req) => {
                 },
                 body: JSON.stringify({
                     model: 'tts-1',
-                    input: text,
+                    input: chunks[0], // Use the chunk, not the original text
                     voice: voice,
                     response_format: 'mp3',
                     speed: speed,
@@ -145,6 +150,11 @@ serve(async (req) => {
 })
 
 function splitTextIntoChunks(text: string, maxChunkSize: number): string[] {
+    // If text is already within limit, return as single chunk
+    if (text.length <= maxChunkSize) {
+        return [text]
+    }
+
     const chunks: string[] = []
     let currentChunk = ''
 
@@ -152,19 +162,22 @@ function splitTextIntoChunks(text: string, maxChunkSize: number): string[] {
     const paragraphs = text.split(/\n\s*\n/)
 
     for (const paragraph of paragraphs) {
-        const sentences = paragraph.split(/(?<=[.!?])\s+/)
+        // Try to split by sentences (improved regex for better sentence detection)
+        const sentences = paragraph.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [paragraph]
 
         for (const sentence of sentences) {
+            const trimmedSentence = sentence.trim()
+            
             // If adding this sentence would exceed the limit
-            if (currentChunk.length + sentence.length + 1 > maxChunkSize) {
+            if (currentChunk.length + trimmedSentence.length + 1 > maxChunkSize) {
                 if (currentChunk.trim()) {
                     chunks.push(currentChunk.trim())
                     currentChunk = ''
                 }
 
                 // If a single sentence is too long, split it by words
-                if (sentence.length > maxChunkSize) {
-                    const words = sentence.split(' ')
+                if (trimmedSentence.length > maxChunkSize) {
+                    const words = trimmedSentence.split(/\s+/)
                     let wordChunk = ''
 
                     for (const word of words) {
@@ -182,16 +195,22 @@ function splitTextIntoChunks(text: string, maxChunkSize: number): string[] {
                         currentChunk = wordChunk
                     }
                 } else {
-                    currentChunk = sentence
+                    currentChunk = trimmedSentence
                 }
             } else {
-                currentChunk += (currentChunk ? ' ' : '') + sentence
+                currentChunk += (currentChunk ? ' ' : '') + trimmedSentence
             }
         }
 
-        // Add paragraph break
-        if (currentChunk.trim()) {
-            currentChunk += '\n\n'
+        // Add paragraph break if there's content and more paragraphs to come
+        if (currentChunk.trim() && paragraphs.indexOf(paragraph) < paragraphs.length - 1) {
+            // Check if adding paragraph break would exceed limit
+            if (currentChunk.length + 2 > maxChunkSize) {
+                chunks.push(currentChunk.trim())
+                currentChunk = ''
+            } else {
+                currentChunk += '\n\n'
+            }
         }
     }
 
@@ -200,5 +219,18 @@ function splitTextIntoChunks(text: string, maxChunkSize: number): string[] {
         chunks.push(currentChunk.trim())
     }
 
-    return chunks.filter(chunk => chunk.length > 0)
+    // Final validation - ensure no chunk exceeds the limit
+    const validatedChunks: string[] = []
+    for (const chunk of chunks) {
+        if (chunk.length > maxChunkSize) {
+            // Emergency split by character count
+            for (let i = 0; i < chunk.length; i += maxChunkSize) {
+                validatedChunks.push(chunk.substring(i, i + maxChunkSize))
+            }
+        } else {
+            validatedChunks.push(chunk)
+        }
+    }
+
+    return validatedChunks.filter(chunk => chunk.length > 0)
 }

@@ -189,7 +189,25 @@ export class SupabaseService {
 
   async saveUserSubjects(userId: string, subjectIds: string[]): Promise<APIResponse<UserSubject[]>> {
     try {
-      // First, delete existing user subjects
+      // Get current user subjects to find which ones are being removed
+      const { data: currentSubjects } = await this.supabase
+        .from('user_subjects')
+        .select('subject_id')
+        .eq('user_id', userId);
+
+      const currentSubjectIds = currentSubjects?.map(s => s.subject_id) || [];
+      const removedSubjectIds = currentSubjectIds.filter(id => !subjectIds.includes(id));
+
+      // Delete courses for removed subjects
+      if (removedSubjectIds.length > 0) {
+        await this.supabase
+          .from('courses')
+          .delete()
+          .eq('user_id', userId)
+          .in('subject_id', removedSubjectIds);
+      }
+
+      // Delete existing user subjects
       await this.supabase
         .from('user_subjects')
         .delete()
@@ -312,6 +330,64 @@ export class SupabaseService {
     }
   }
 
+  async getCourseWithProgress(courseId: string, userId: string): Promise<APIResponse<Course & { progress?: UserProgress[] }>> {
+    try {
+      const { data: course, error: courseError } = await this.supabase
+        .from('courses')
+        .select(`
+          *,
+          subject:subjects(*),
+          lessons(*)
+        `)
+        .eq('id', courseId)
+        .single();
+
+      if (courseError) throw courseError;
+
+      const courseLessons = course.lessons || [];
+
+      // Get user progress for all lessons in this course
+      const { data: progress, error: progressError } = await this.supabase
+        .from('user_progress')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('course_id', courseId);
+
+      if (progressError) throw progressError;
+
+      // Calculate completed lessons and next lesson
+      const completedLessons = progress?.filter(p => p.progress_percentage >= 100).length || 0;
+      const nextLesson = courseLessons?.find(lesson =>
+        !progress?.some(p => p.lesson_id === lesson.id && p.progress_percentage >= 100)
+      );
+
+      const enrichedCourse = {
+        ...course,
+        lessons: courseLessons,
+        completed_lessons: completedLessons,
+        next_lesson: nextLesson ? {
+          id: nextLesson.id,
+          title: nextLesson.title,
+          duration: nextLesson.duration,
+          lesson_order: nextLesson.lesson_order
+        } : undefined,
+        progress
+      };
+
+      console.log('Final course data:', {
+        title: enrichedCourse.title,
+        lessonsCount: enrichedCourse.lessons?.length || 0,
+        completedLessons: enrichedCourse.completed_lessons,
+        hasNextLesson: !!enrichedCourse.next_lesson
+      });
+
+      return { data: enrichedCourse };
+    } catch (error) {
+      console.error('Get Course With Progress Error:', error);
+      return { error: error.message };
+    }
+  }
+
   // Lesson Management
   async createLesson(lesson: Omit<Lesson, 'id' | 'created_at'>): Promise<APIResponse<Lesson>> {
     try {
@@ -397,12 +473,21 @@ export class SupabaseService {
   // Progress Tracking
   async updateProgress(progress: Omit<UserProgress, 'id' | 'created_at' | 'updated_at'>): Promise<APIResponse<UserProgress>> {
     try {
+      // Map TypeScript interface fields to database column names
+      const dbProgress = {
+        user_id: progress.user_id,
+        course_id: progress.course_id,
+        lesson_id: progress.lesson_id,
+        progress_percentage: progress.progress_percentage,
+        total_time_spent: Math.round(progress.time_spent || 0), // Ensure integer for database
+        last_position_seconds: Math.round(progress.last_position || 0), // Ensure integer for database
+        completed_at: progress.completed_at,
+        updated_at: new Date().toISOString(),
+      };
+
       const { data, error } = await this.supabase
         .from('user_progress')
-        .upsert({
-          ...progress,
-          updated_at: new Date().toISOString(),
-        })
+        .upsert(dbProgress)
         .select()
         .single();
 
@@ -457,7 +542,7 @@ export class SupabaseService {
   }
 
   // Interaction Management
-  async createLessonInteraction(interaction: Omit<LessonInteraction, 'id' | 'created_at'>): Promise<APIResponse<LessonInteraction>> {
+  async createLessonInteraction(interaction: Omit<LessonInteraction, 'id' | 'created_at' | 'updated_at'>): Promise<APIResponse<LessonInteraction>> {
     try {
       const { data, error } = await this.supabase
         .from('lesson_interactions')
@@ -479,12 +564,29 @@ export class SupabaseService {
         .from('lesson_interactions')
         .select('*')
         .eq('lesson_id', lessonId)
-        .order('interaction_order');
+        .order('position_seconds', { ascending: true });
 
       if (error) throw error;
       return { data };
     } catch (error) {
       console.error('Get Lesson Interactions Error:', error);
+      return { error: error.message };
+    }
+  }
+
+  async getUserInteractionResponse(userId: string, interactionId: string): Promise<APIResponse<UserInteractionResponse>> {
+    try {
+      const { data, error } = await this.supabase
+        .from('user_interaction_responses')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('interaction_id', interactionId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') throw error; // PGRST116 is "no rows returned"
+      return { data: data || null };
+    } catch (error) {
+      console.error('Get User Interaction Response Error:', error);
       return { error: error.message };
     }
   }
@@ -706,152 +808,6 @@ export class SupabaseService {
   // Get Supabase client for direct access if needed
   getClient(): SupabaseClient {
     return this.supabase;
-  }
-  // Pre-Generated Content Operations
-  async createPreGeneratedCourse(courseData: {
-    title: string;
-    subject_id: string;
-    total_lessons: number;
-    estimated_duration: number;
-    difficulty: 'beginner' | 'intermediate' | 'advanced';
-    commute_time: number;
-    is_premium: boolean;
-    description: string;
-    tags: string[];
-  }): Promise<APIResponse<any>> {
-    try {
-      const { data, error } = await this.supabase
-        .from('pre_generated_courses')
-        .insert([courseData])
-        .select()
-        .single();
-
-      if (error) throw error;
-      return { data };
-    } catch (error) {
-      console.error('Create Pre-Generated Course Error:', error);
-      return { error: error.message };
-    }
-  }
-
-  async createPreGeneratedLesson(lessonData: {
-    course_id: string;
-    title: string;
-    content: string;
-    duration: number;
-    transcript: string;
-    lesson_order: number;
-    topic: string;
-    objectives: string[];
-    key_concepts: string[];
-  }): Promise<APIResponse<any>> {
-    try {
-      const { data, error } = await this.supabase
-        .from('pre_generated_lessons')
-        .insert([lessonData])
-        .select()
-        .single();
-
-      if (error) throw error;
-      return { data };
-    } catch (error) {
-      console.error('Create Pre-Generated Lesson Error:', error);
-      return { error: error.message };
-    }
-  }
-
-  async createPreGeneratedLessonInteraction(interactionData: {
-    lesson_id: string;
-    type: 'quiz' | 'reflection' | 'practice';
-    prompt: string;
-    options?: string[];
-    correct_answer?: string;
-    interaction_order: number;
-  }): Promise<APIResponse<any>> {
-    try {
-      const { data, error } = await this.supabase
-        .from('pre_generated_lesson_interactions')
-        .insert([interactionData])
-        .select()
-        .single();
-
-      if (error) throw error;
-      return { data };
-    } catch (error) {
-      console.error('Create Pre-Generated Lesson Interaction Error:', error);
-      return { error: error.message };
-    }
-  }
-
-  async getPreGeneratedCourses(filters: {
-    subject_id?: string;
-    commute_time?: number;
-    difficulty?: 'beginner' | 'intermediate' | 'advanced';
-  }): Promise<APIResponse<any[]>> {
-    try {
-      let query = this.supabase
-        .from('pre_generated_courses')
-        .select(`
-          *,
-          subject:subjects(*)
-        `);
-
-      if (filters.subject_id) {
-        query = query.eq('subject_id', filters.subject_id);
-      }
-      if (filters.commute_time) {
-        query = query.eq('commute_time', filters.commute_time);
-      }
-      if (filters.difficulty) {
-        query = query.eq('difficulty', filters.difficulty);
-      }
-
-      const { data, error } = await query.order('created_at', { ascending: false });
-
-      if (error) throw error;
-      return { data };
-    } catch (error) {
-      console.error('Get Pre-Generated Courses Error:', error);
-      return { error: error.message };
-    }
-  }
-
-  async getPreGeneratedCourseById(courseId: string): Promise<any> {
-    try {
-      const { data, error } = await this.supabase
-        .from('pre_generated_courses')
-        .select(`
-          *,
-          subject:subjects(*)
-        `)
-        .eq('id', courseId)
-        .single();
-
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      console.error('Get Pre-Generated Course By ID Error:', error);
-      return null;
-    }
-  }
-
-  async getPreGeneratedCourseLessons(courseId: string): Promise<APIResponse<any[]>> {
-    try {
-      const { data, error } = await this.supabase
-        .from('pre_generated_lessons')
-        .select(`
-          *,
-          interactions:pre_generated_lesson_interactions(*)
-        `)
-        .eq('course_id', courseId)
-        .order('lesson_order', { ascending: true });
-
-      if (error) throw error;
-      return { data };
-    } catch (error) {
-      console.error('Get Pre-Generated Course Lessons Error:', error);
-      return { error: error.message };
-    }
   }
 
   async getPopularSubjects(limit: number = 10): Promise<any[]> {

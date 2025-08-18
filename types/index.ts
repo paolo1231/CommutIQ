@@ -37,25 +37,15 @@ export interface Course {
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   is_premium: boolean;
   created_at: string;
-  pre_generated_course_id?: string; // Link to pre-generated course for free users
+  completed_lessons?: number; // number of completed lessons
+  next_lesson?: {
+    id: string;
+    title: string;
+    duration: number;
+    lesson_order: number;
+  }; // next lesson to be taken
   subject?: Subject; // joined data
   lessons?: Lesson[]; // joined data
-}
-
-export interface PreGeneratedCourse {
-  id: string;
-  title: string;
-  subject_id: string;
-  total_lessons: number;
-  estimated_duration: number; // total minutes
-  difficulty: 'beginner' | 'intermediate' | 'advanced';
-  commute_time: number; // target commute time in minutes
-  is_premium: boolean;
-  description: string;
-  tags: string[];
-  created_at: string;
-  subject?: Subject; // joined data
-  lessons?: PreGeneratedLesson[]; // joined data
 }
 
 export interface Lesson {
@@ -67,32 +57,6 @@ export interface Lesson {
   duration: number; // minutes
   transcript: string;
   lesson_order: number;
-  created_at: string;
-}
-
-export interface PreGeneratedLesson {
-  id: string;
-  course_id: string;
-  title: string;
-  content: string; // AI-generated content
-  duration: number; // minutes
-  transcript: string;
-  lesson_order: number;
-  topic: string;
-  objectives: string[];
-  key_concepts: string[];
-  created_at: string;
-  interactions?: PreGeneratedLessonInteraction[]; // joined data
-}
-
-export interface PreGeneratedLessonInteraction {
-  id: string;
-  lesson_id: string;
-  type: 'quiz' | 'reflection' | 'practice';
-  prompt: string;
-  options?: string[];
-  correct_answer?: string;
-  interaction_order: number;
   created_at: string;
 }
 
@@ -118,24 +82,85 @@ export interface UserProgress {
   updated_at: string;
 }
 
+// Lesson Interaction Types
 export interface LessonInteraction {
   id: string;
   lesson_id: string;
-  type: 'quiz' | 'reflection' | 'practice';
-  prompt: string;
-  options?: string[];
-  correct_answer?: string;
-  interaction_order: number;
+  type: 'quiz' | 'reflection' | 'discussion';
+  title: string;
+  content: QuizContent | ReflectionContent | DiscussionContent;
+  position_seconds: number; // When to show interaction during playback
+  is_required: boolean;
+  metadata?: any;
   created_at: string;
+  updated_at?: string;
+}
+
+// Quiz specific content structure
+export interface QuizContent {
+  question: string;
+  options: QuizOption[];
+  correct_answer_index: number;
+  explanation?: string;
+  time_limit_seconds?: number;
+}
+
+export interface QuizOption {
+  id: string;
+  text: string;
+  is_correct?: boolean;
+}
+
+// Reflection specific content structure
+export interface ReflectionContent {
+  prompt: string;
+  suggested_response_length?: number; // in words
+  guidance_points?: string[];
+  example_response?: string;
+}
+
+// Discussion specific content structure
+export interface DiscussionContent {
+  topic: string;
+  discussion_points: string[];
+  starter_questions?: string[];
+  resources?: DiscussionResource[];
+}
+
+export interface DiscussionResource {
+  title: string;
+  url?: string;
+  description?: string;
 }
 
 export interface UserInteractionResponse {
   id: string;
   user_id: string;
   interaction_id: string;
-  user_response: string;
-  is_correct?: boolean;
+  response: QuizResponse | ReflectionResponse | DiscussionResponse;
+  score?: number; // 0-100 for quiz, optional for others
   completed_at: string;
+  metadata?: any;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface QuizResponse {
+  selected_option_id: string;
+  selected_option_index: number;
+  is_correct: boolean;
+  time_taken_seconds: number;
+}
+
+export interface ReflectionResponse {
+  text: string;
+  word_count: number;
+}
+
+export interface DiscussionResponse {
+  thoughts: string;
+  selected_points: string[];
+  additional_questions?: string[];
 }
 
 // Cross-Device Sync Models
@@ -369,7 +394,8 @@ export type RootStackParamList = {
   Onboarding: undefined;
   SubjectSelection: { commuteTime: number };
   Dashboard: undefined;
-  Lesson: { lessonId: string; courseId: string };
+  Lesson: { lessonId: string; courseId?: string };
+  Course: { courseId: string };
   Settings: undefined;
   Premium: undefined;
   Auth: undefined;
