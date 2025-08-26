@@ -1,19 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import React, { useEffect, useState, useCallback } from 'react';
-import { 
-  Alert, 
-  Dimensions, 
-  ScrollView, 
-  StyleSheet, 
-  Text, 
-  TouchableOpacity, 
-  View 
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  Alert,
+  Dimensions,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { Layout } from '../../components/Layout';
+import AppNavigation from '../../lib/navigation';
 import { supabaseService } from '../../services/supabaseService';
 import { Course, Lesson, UserProgress } from '../../types';
-import AppNavigation from '../../lib/navigation';
 
 export default function CourseDetailScreen() {
   const { courseId } = useLocalSearchParams<{ courseId: string }>();
@@ -21,7 +21,7 @@ export default function CourseDetailScreen() {
   const isTablet = screenWidth >= 768;
   const isMobile = screenWidth < 768;
   const styles = createStyles(screenWidth, isMobile, isTablet);
-  
+
   const [course, setCourse] = useState<Course | null>(null);
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [progress, setProgress] = useState<UserProgress[]>([]);
@@ -54,12 +54,12 @@ export default function CourseDetailScreen() {
           return lessons.some(l => l.id === p.lesson_id);
         });
         setProgress(courseProgress);
-        
+
         // Update completed lessons count
-        const completedCount = lessons.filter(lesson => 
+        const completedCount = lessons.filter(lesson =>
           courseProgress.some(p => p.lesson_id === lesson.id && p.progress_percentage >= 100)
         ).length;
-        
+
         if (course) {
           setCourse({
             ...course,
@@ -75,7 +75,7 @@ export default function CourseDetailScreen() {
   const loadCourseDetails = async () => {
     try {
       const { user } = await supabaseService.getCurrentUser();
-      
+
       if (!user) {
         router.replace('/onboarding');
         return;
@@ -83,14 +83,14 @@ export default function CourseDetailScreen() {
 
       // Load course with progress data
       const courseResponse = await supabaseService.getCourseWithProgress(courseId, user.id);
-      
+
       if (courseResponse.error || !courseResponse.data) {
         Alert.alert('Error', 'Failed to load course details');
         return;
       }
 
       const courseData = courseResponse.data;
-      
+
       // Debug logging
       console.log('Course loaded:', {
         title: courseData.title,
@@ -98,16 +98,16 @@ export default function CourseDetailScreen() {
         lessonsCount: courseData.lessons?.length || 0,
         lessons: courseData.lessons?.map(l => ({ id: l.id, title: l.title, order: l.lesson_order }))
       });
-      
+
       setCourse(courseData);
       setProgress(courseData.progress || []);
 
       // Set lessons sorted by lesson_order
       const sortedLessons = courseData.lessons?.sort((a, b) => a.lesson_order - b.lesson_order) || [];
-      
+
       console.log('Final lessons:', sortedLessons.map(l => ({ id: l.id, title: l.title })));
       setLessons(sortedLessons);
-      
+
     } catch (error) {
       console.error('Error loading course details:', error);
       Alert.alert('Error', 'Failed to load course details');
@@ -149,8 +149,8 @@ export default function CourseDetailScreen() {
       <Layout>
         <View style={styles.centerContainer}>
           <Text style={styles.errorText}>Course not found</Text>
-          <TouchableOpacity 
-            style={styles.backButton} 
+          <TouchableOpacity
+            style={styles.backButton}
             onPress={() => router.back()}
           >
             <Text style={styles.backButtonText}>Go Back</Text>
@@ -170,7 +170,7 @@ export default function CourseDetailScreen() {
         <View style={styles.content}>
           {/* Header */}
           <View style={styles.header}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.backButtonContainer}
               onPress={() => router.back()}
             >
@@ -189,7 +189,7 @@ export default function CourseDetailScreen() {
                 style={styles.courseIcon}
               />
             </View>
-            
+
             <View style={styles.courseInfo}>
               <Text style={styles.courseTitle}>{course.title}</Text>
               <Text style={styles.courseCategory}>{course.subject?.name || 'Course'}</Text>
@@ -205,11 +205,11 @@ export default function CourseDetailScreen() {
               </Text>
             </View>
             <View style={styles.progressBarContainer}>
-              <View 
+              <View
                 style={[
-                  styles.progressBar, 
+                  styles.progressBar,
                   { width: `${progressPercentage}%` }
-                ]} 
+                ]}
               />
             </View>
           </View>
@@ -217,7 +217,7 @@ export default function CourseDetailScreen() {
           {/* Course Lessons */}
           <View style={styles.lessonsSection}>
             <Text style={styles.sectionTitle}>Course Lessons</Text>
-            
+
             <View style={styles.lessonsList}>
               {lessons.length === 0 ? (
                 <View style={styles.emptyLessonsContainer}>
@@ -229,101 +229,96 @@ export default function CourseDetailScreen() {
                 </View>
               ) : (
                 lessons.map((lesson, index) => {
-                console.log(`Rendering lesson ${index}:`, { 
-                  id: lesson.id, 
-                  title: lesson.title,
-                  order: lesson.lesson_order 
-                });
-                
-                if (!lesson.id) {
-                  console.error('Lesson has no ID:', lesson);
-                  return null;
-                }
-                
-                const isCompleted = isLessonCompleted(lesson.id);
-                const lessonProgressPercentage = getLessonProgress(lesson.id);
-                const isNextLesson = !isCompleted && lessons.slice(0, index).every(l => isLessonCompleted(l.id));
-                
-                return (
-                  <TouchableOpacity
-                    key={lesson.id}
-                    style={[
-                      styles.lessonCard,
-                      isCompleted && styles.lessonCardCompleted,
-                      isNextLesson && styles.lessonCardNext
-                    ]}
-                    onPress={() => handleStartLesson(lesson.id)}
-                    disabled={!isCompleted && !isNextLesson && index > 0}
-                  >
-                    <View style={styles.lessonNumber}>
-                      <Text style={[
-                        styles.lessonNumberText,
-                        isCompleted && styles.lessonNumberTextCompleted,
-                        isNextLesson && styles.lessonNumberTextNext
-                      ]}>
-                        {index + 1}
-                      </Text>
-                    </View>
-                    
-                    <View style={styles.lessonContent}>
-                      <Text style={[
-                        styles.lessonTitle,
-                        isCompleted && styles.lessonTitleCompleted
-                      ]}>
-                        {lesson.title}
-                      </Text>
-                      <Text style={styles.lessonDuration}>
-                        {lesson.duration} min • Audio Lesson
-                      </Text>
-                      
-                      {lessonProgressPercentage > 0 && lessonProgressPercentage < 100 && (
-                        <View style={styles.lessonProgressContainer}>
-                          <View style={styles.lessonProgressBarContainer}>
-                            <View 
-                              style={[
-                                styles.lessonProgressBar,
-                                { width: `${lessonProgressPercentage}%` }
-                              ]}
-                            />
-                          </View>
-                          <Text style={styles.lessonProgressText}>
-                            {Math.round(lessonProgressPercentage)}%
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    
-                    <TouchableOpacity 
+
+                  if (!lesson.id) {
+                    console.error('Lesson has no ID:', lesson);
+                    return null;
+                  }
+
+                  const isCompleted = isLessonCompleted(lesson.id);
+                  const lessonProgressPercentage = getLessonProgress(lesson.id);
+                  const isNextLesson = !isCompleted && lessons.slice(0, index).every(l => isLessonCompleted(l.id));
+
+                  return (
+                    <TouchableOpacity
+                      key={lesson.id}
                       style={[
-                        styles.startButton,
-                        isCompleted && styles.startButtonCompleted,
-                        isNextLesson && styles.startButtonNext,
-                        (!isCompleted && !isNextLesson && index > 0) && styles.startButtonDisabled
+                        styles.lessonCard,
+                        isCompleted && styles.lessonCardCompleted,
+                        isNextLesson && styles.lessonCardNext
                       ]}
                       onPress={() => handleStartLesson(lesson.id)}
                       disabled={!isCompleted && !isNextLesson && index > 0}
                     >
-                      <Ionicons 
-                        name={isCompleted ? "checkmark" : "play"} 
-                        size={16} 
-                        color={
-                          isCompleted ? "#10b981" : 
-                          isNextLesson ? "white" : 
-                          (!isCompleted && !isNextLesson && index > 0) ? "#9ca3af" : "#4f46e5"
-                        } 
-                      />
-                      <Text style={[
-                        styles.startButtonText,
-                        isCompleted && styles.startButtonTextCompleted,
-                        isNextLesson && styles.startButtonTextNext,
-                        (!isCompleted && !isNextLesson && index > 0) && styles.startButtonTextDisabled
-                      ]}>
-                        {isCompleted ? "Completed" : isNextLesson ? "Start" : lessonProgressPercentage > 0 ? "Continue" : "Start"}
-                      </Text>
+                      <View style={styles.lessonNumber}>
+                        <Text style={[
+                          styles.lessonNumberText,
+                          isCompleted && styles.lessonNumberTextCompleted,
+                          isNextLesson && styles.lessonNumberTextNext
+                        ]}>
+                          {index + 1}
+                        </Text>
+                      </View>
+
+                      <View style={styles.lessonContent}>
+                        <Text style={[
+                          styles.lessonTitle,
+                          isCompleted && styles.lessonTitleCompleted
+                        ]}>
+                          {lesson.title}
+                        </Text>
+                        <Text style={styles.lessonDuration}>
+                          {lesson.duration} min • Audio Lesson
+                        </Text>
+
+                        {lessonProgressPercentage > 0 && lessonProgressPercentage < 100 && (
+                          <View style={styles.lessonProgressContainer}>
+                            <View style={styles.lessonProgressBarContainer}>
+                              <View
+                                style={[
+                                  styles.lessonProgressBar,
+                                  { width: `${lessonProgressPercentage}%` }
+                                ]}
+                              />
+                            </View>
+                            <Text style={styles.lessonProgressText}>
+                              {Math.round(lessonProgressPercentage)}%
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.startButton,
+                          isCompleted && styles.startButtonCompleted,
+                          isNextLesson && styles.startButtonNext,
+                          (!isCompleted && !isNextLesson && index > 0) && styles.startButtonDisabled
+                        ]}
+                        onPress={() => handleStartLesson(lesson.id)}
+                        disabled={!isCompleted && !isNextLesson && index > 0}
+                      >
+                        <Ionicons
+                          name={isCompleted ? "checkmark" : "play"}
+                          size={16}
+                          color={
+                            isCompleted ? "#10b981" :
+                              isNextLesson ? "white" :
+                                (!isCompleted && !isNextLesson && index > 0) ? "#9ca3af" : "#4f46e5"
+                          }
+                        />
+                        <Text style={[
+                          styles.startButtonText,
+                          isCompleted && styles.startButtonTextCompleted,
+                          isNextLesson && styles.startButtonTextNext,
+                          (!isCompleted && !isNextLesson && index > 0) && styles.startButtonTextDisabled
+                        ]}>
+                          {isCompleted ? "Completed" : isNextLesson ? "Start" : lessonProgressPercentage > 0 ? "Continue" : "Start"}
+                        </Text>
+                      </TouchableOpacity>
                     </TouchableOpacity>
-                  </TouchableOpacity>
-                );
-              })
+                  );
+                })
               )}
             </View>
           </View>

@@ -1,3 +1,4 @@
+import { AudioPlayer } from '@/components/AudioPlayer';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -10,7 +11,6 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { AudioPlayer } from '../../components/AudioPlayer';
 import { Layout } from '../../components/Layout';
 import { supabaseService } from '../../services/supabaseService';
 import { Course, Lesson } from '../../types';
@@ -130,8 +130,12 @@ export default function LessonScreen() {
             transcript={lesson.transcript}
             title={lesson.title}
             voice="sage"
+            showTranscript={false}
+            autoPlay={false}
             useClientSideTTS={false}
-            showTranscript={false} // We're showing our own transcript below
+            onComplete={() => {
+              console.log(`[Lesson] Audio playback completed for lesson: ${lesson.title}`);
+            }}
           />
         </View>
 

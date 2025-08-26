@@ -39,7 +39,7 @@ serve(async (req) => {
         // Split text into chunks if it's too long (OpenAI limit is 4096)
         const maxChunkSize = 4000 // Leave some buffer
         const chunks = splitTextIntoChunks(text, maxChunkSize)
-        
+
         console.log(`Text length: ${text.length}, Chunks created: ${chunks.length}`)
         if (chunks.length > 1) {
             console.log(`Chunk sizes: ${chunks.map(c => c.length).join(', ')}`)
@@ -73,13 +73,26 @@ serve(async (req) => {
                 )
             }
 
-            // Stream the audio response directly
+            // Get content length if available
+            const contentLength = response.headers.get('content-length');
+
+            // Stream the audio response directly with streaming-optimized headers
+            const streamHeaders = {
+                ...corsHeaders,
+                'Content-Type': 'audio/mpeg',
+                'Accept-Ranges': 'bytes', // Enable range requests for streaming
+                'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
+                'Content-Disposition': 'inline', // Allow inline playback
+                'X-Content-Type-Options': 'nosniff', // Security header
+            };
+
+            // Add content length if available for better streaming
+            if (contentLength) {
+                streamHeaders['Content-Length'] = contentLength;
+            }
+
             return new Response(response.body, {
-                headers: {
-                    ...corsHeaders,
-                    'Content-Type': 'audio/mpeg',
-                    'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
-                },
+                headers: streamHeaders,
             })
         }
 
@@ -133,7 +146,10 @@ serve(async (req) => {
             headers: {
                 ...corsHeaders,
                 'Content-Type': 'audio/mpeg',
+                'Accept-Ranges': 'bytes', // Enable range requests for streaming
                 'Cache-Control': 'public, max-age=3600',
+                'Content-Disposition': 'inline', // Allow inline playback
+                'X-Content-Type-Options': 'nosniff', // Security header
             },
         })
 
@@ -167,7 +183,7 @@ function splitTextIntoChunks(text: string, maxChunkSize: number): string[] {
 
         for (const sentence of sentences) {
             const trimmedSentence = sentence.trim()
-            
+
             // If adding this sentence would exceed the limit
             if (currentChunk.length + trimmedSentence.length + 1 > maxChunkSize) {
                 if (currentChunk.trim()) {

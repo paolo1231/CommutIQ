@@ -1,38 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  Platform,
-  ScrollView,
-  ActivityIndicator,
-} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
+import { Audio } from 'expo-av';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { ttsService } from '../services/ttsService';
-
-// Platform-specific imports
-let TrackPlayer: any = null;
-let usePlaybackState: any = null;
-let useProgress: any = null;
-let State: any = null;
-let Capability: any = null;
-let RepeatMode: any = null;
-
-if (Platform.OS !== 'web') {
-  try {
-    const trackPlayerModule = require('../utils/trackPlayerWrapper');
-    TrackPlayer = trackPlayerModule.default;
-    usePlaybackState = trackPlayerModule.usePlaybackState;
-    useProgress = trackPlayerModule.useProgress;
-    State = trackPlayerModule.State;
-    Capability = trackPlayerModule.Capability;
-    RepeatMode = trackPlayerModule.RepeatMode;
-  } catch (error) {
-    console.log('TrackPlayer not available');
-  }
-}
 
 interface AudioPlayerProps {
   transcript: string;
@@ -66,103 +44,94 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
-  const [hasInitialized, setHasInitialized] = useState(false);
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
 
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const playbackState = Platform.OS !== 'web' && usePlaybackState ? usePlaybackState() : null;
-  const progress = Platform.OS !== 'web' && useProgress ? useProgress() : null;
-  const lastProgressUpdateRef = useRef<number>(0);
+  const soundRef = useRef<Audio.Sound | null>(null);
+  const progressUpdateInterval = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize TrackPlayer on native platforms
+  // Initialize Audio settings
   useEffect(() => {
-    if (Platform.OS !== 'web' && TrackPlayer && !hasInitialized) {
-      const setupPlayer = async () => {
-        try {
-          await TrackPlayer.setupPlayer();
-          await TrackPlayer.updateOptions({
-            capabilities: [
-              Capability.Play,
-              Capability.Pause,
-              Capability.SeekTo,
-            ],
-          });
-          setHasInitialized(true);
-        } catch (error) {
-          console.error('Error setting up TrackPlayer:', error);
+    const setupAudio = async () => {
+      try {
+        // Check if Audio is available
+        if (!Audio) {
+          console.error('[AudioPlayer] ❌ Audio from expo-av is not available');
+          setError('Audio library not available. Please restart the app.');
+          return;
         }
-      };
-      setupPlayer();
 
-      return () => {
-        TrackPlayer.destroy().catch(() => {});
-      };
-    }
-  }, [hasInitialized]);
-
-  // Web audio event handlers
-  useEffect(() => {
-    if (Platform.OS === 'web' && audioRef.current) {
-      const audio = audioRef.current;
-
-      const handleTimeUpdate = () => {
-        setCurrentTime(audio.currentTime);
-        if (audio.duration && !isNaN(audio.duration)) {
-          setDuration(audio.duration);
-          
-          // Throttle progress updates to once per second
-          const now = Date.now();
-          if (now - lastProgressUpdateRef.current >= 1000) {
-            const progress = (audio.currentTime / audio.duration) * 100;
-            onProgressUpdate?.(progress, audio.currentTime);
-            lastProgressUpdateRef.current = now;
-          }
-        }
-      };
-
-      const handleEnded = () => {
-        setIsPlaying(false);
-        onComplete?.();
-      };
-
-      const handleCanPlay = () => {
-        setIsLoading(false);
-        if (autoPlay && !isPlaying) {
-          audio.play().catch(() => {});
-          setIsPlaying(true);
-        }
-      };
-
-      audio.addEventListener('timeupdate', handleTimeUpdate);
-      audio.addEventListener('ended', handleEnded);
-      audio.addEventListener('canplay', handleCanPlay);
-      audio.addEventListener('loadstart', () => setIsLoading(true));
-
-      return () => {
-        audio.removeEventListener('timeupdate', handleTimeUpdate);
-        audio.removeEventListener('ended', handleEnded);
-        audio.removeEventListener('canplay', handleCanPlay);
-        audio.removeEventListener('loadstart', () => {});
-      };
-    }
-  }, [onProgressUpdate, onComplete, autoPlay, isPlaying]);
-
-  // Native progress updates
-  useEffect(() => {
-    if (Platform.OS !== 'web' && progress) {
-      setCurrentTime(progress.position);
-      setDuration(progress.duration || 0);
-      
-      // Throttle progress updates to once per second
-      const now = Date.now();
-      if (onProgressUpdate && progress.position > 0 && now - lastProgressUpdateRef.current >= 1000) {
-        const progressPercentage = progress.duration > 0 ? (progress.position / progress.duration) * 100 : 0;
-        onProgressUpdate(progressPercentage, progress.position);
-        lastProgressUpdateRef.current = now;
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          staysActiveInBackground: false,
+          playsInSilentModeIOS: true,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+        });
+        console.log('[AudioPlayer] 🎵 Audio mode configured');
+      } catch (error) {
+        console.error('[AudioPlayer] ❌ Error setting up audio:', error);
+        setError('Failed to initialize audio. Please restart the app.');
       }
+    };
+
+    setupAudio();
+
+    // Cleanup on unmount
+    return () => {
+      if (soundRef.current) {
+        soundRef.current.unloadAsync().catch(console.error);
+      }
+      if (progressUpdateInterval.current) {
+        clearInterval(progressUpdateInterval.current);
+      }
+    };
+  }, []);
+
+  // Progress tracking for Expo AV
+  const startProgressTracking = () => {
+    if (progressUpdateInterval.current) {
+      clearInterval(progressUpdateInterval.current);
     }
-  }, [progress, onProgressUpdate]);
+
+    progressUpdateInterval.current = setInterval(async () => {
+      if (soundRef.current) {
+        try {
+          const status = await soundRef.current.getStatusAsync();
+          if (status.isLoaded) {
+            const position = status.positionMillis / 1000;
+            const duration = status.durationMillis ? status.durationMillis / 1000 : 0;
+
+            setCurrentTime(position);
+            setDuration(duration);
+
+            if (duration > 0) {
+              const progress = (position / duration) * 100;
+              onProgressUpdate?.(progress, position);
+            }
+
+            // Check if playback ended
+            if (status.didJustFinish) {
+              setIsPlaying(false);
+              onComplete?.();
+              if (progressUpdateInterval.current) {
+                clearInterval(progressUpdateInterval.current);
+              }
+            }
+          }
+        } catch (error) {
+          console.error('[AudioPlayer] ❌ Error tracking progress:', error);
+        }
+      }
+    }, 1000);
+  };
+
+  const stopProgressTracking = () => {
+    if (progressUpdateInterval.current) {
+      clearInterval(progressUpdateInterval.current);
+      progressUpdateInterval.current = null;
+    }
+  };
 
   // Don't generate audio immediately - wait for user interaction
   // This improves initial page load performance
@@ -178,91 +147,114 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     try {
       setIsGeneratingAudio(true);
       setError(null);
+      console.log('[AudioPlayer] 🎵 Starting audio generation...');
 
-      const url = await ttsService.generateAudio(transcript, { voice });
+      // Use streaming audio generation for better performance
+      const url = await ttsService.generateStreamingAudio(transcript, {
+        voice,
+        speed: playbackSpeed,
+        onLoadStart: () => {
+          console.log(`[AudioPlayer] 🔄 TTS generation started`);
+        },
+        onProgress: (loaded, total) => {
+          const percentage = total > 0 ? ((loaded / total) * 100).toFixed(1) : '0';
+          console.log(`[AudioPlayer] 📊 TTS progress: ${percentage}%`);
+        },
+        onCanPlay: () => {
+          console.log(`[AudioPlayer] ✅ Audio ready for playback`);
+          setIsLoading(false);
+        },
+        onError: (err) => {
+          console.error(`[AudioPlayer] ❌ TTS error:`, err);
+          throw err;
+        },
+      });
+
+      console.log('[AudioPlayer] 🎵 Audio generated, URL:', url.substring(0, 50) + '...');
       setAudioUrl(url);
 
-      // Load the audio with streaming support
-      if (Platform.OS === 'web' && audioRef.current) {
-        audioRef.current.src = url;
-        // Use preload="none" for lazy loading, "metadata" for duration info only,
-        // or "auto" for immediate loading (when user has interacted)
-        audioRef.current.preload = hasUserInteracted ? 'auto' : 'metadata';
-        audioRef.current.load();
-      } else if (Platform.OS !== 'web' && TrackPlayer && hasInitialized) {
-        await TrackPlayer.reset();
-        await TrackPlayer.add({
-          id: 'audio-' + Date.now(),
-          url: url,
-          title: title || 'Audio',
-          artist: 'CommutIQ',
-        });
-        if (RepeatMode) {
-          await TrackPlayer.setRepeatMode(RepeatMode.Off);
-        }
-      }
+      // Load audio with Expo AV
+      await loadAudio(url);
 
       if (autoPlay) {
+        console.log('[AudioPlayer] 🚀 Auto-playing...');
         await handlePlay();
       }
     } catch (err) {
-      console.error('Error generating audio:', err);
+      console.error('[AudioPlayer] ❌ Error generating audio:', err);
       setError(err instanceof Error ? err.message : 'Failed to generate audio');
     } finally {
       setIsGeneratingAudio(false);
     }
   };
 
+  const loadAudio = async (uri: string) => {
+    try {
+      console.log('[AudioPlayer] 🔄 Loading audio with Expo AV...');
+
+      // Check if Audio is available
+      if (!Audio || !Audio.Sound) {
+        throw new Error('Audio.Sound from expo-av is not available');
+      }
+
+      // Unload previous sound if exists
+      if (soundRef.current) {
+        await soundRef.current.unloadAsync();
+      }
+
+      // Create new sound
+      const { sound } = await Audio.Sound.createAsync(
+        { uri },
+        {
+          shouldPlay: false,
+          isLooping: false,
+          rate: playbackSpeed,
+        }
+      );
+
+      soundRef.current = sound;
+      console.log('[AudioPlayer] ✅ Audio loaded successfully');
+
+      // Get initial status to set duration
+      const status = await sound.getStatusAsync();
+      if (status.isLoaded && status.durationMillis) {
+        setDuration(status.durationMillis / 1000);
+      }
+
+    } catch (error) {
+      console.error('[AudioPlayer] ❌ Error loading audio:', error);
+      setError('Failed to load audio. Please try again.');
+    }
+  };
+
   const handlePlay = async () => {
     try {
+      console.log('[AudioPlayer] ▶️ handlePlay called');
       // Mark that user has interacted
       setHasUserInteracted(true);
-      
-      if (useClientSideTTS) {
-        // Use browser speech synthesis for web only
-        if (Platform.OS === 'web' && 'speechSynthesis' in window) {
-          const utterance = new SpeechSynthesisUtterance(transcript);
-          utterance.rate = playbackSpeed;
-          utterance.onend = () => {
-            setIsPlaying(false);
-            onComplete?.();
-          };
-          speechSynthesis.speak(utterance);
-          setIsPlaying(true);
-        } else {
-          setError('Client-side TTS not available on this platform');
-        }
-      } else {
-        // Generate audio if not already available
-        if (!audioUrl && !isGeneratingAudio) {
-          setIsLoading(true);
-          await generateAudio();
-          // After generation, try to play immediately
-          if (Platform.OS === 'web' && audioRef.current) {
-            audioRef.current.play().catch(console.error);
-            setIsPlaying(true);
-          }
-          return;
-        }
 
-        if (Platform.OS === 'web' && audioRef.current) {
-          // For web, ensure audio is ready to play
-          if (audioRef.current.readyState >= 2) { // HAVE_CURRENT_DATA or better
-            await audioRef.current.play();
-            setIsPlaying(true);
-          } else {
-            // Audio not ready, set loading and wait for canplay event
-            setIsLoading(true);
-            audioRef.current.load();
-            // The canplay event handler will auto-play
-          }
-        } else if (Platform.OS !== 'web' && TrackPlayer) {
-          await TrackPlayer.play();
-          setIsPlaying(true);
-        }
+      // Generate audio if not already available
+      if (!audioUrl && !isGeneratingAudio) {
+        console.log('[AudioPlayer] 🔄 No audio URL, generating...');
+        setIsLoading(true);
+        await generateAudio();
+        return; // generateAudio will call handlePlay again if autoPlay is true
       }
+
+      if (!soundRef.current) {
+        console.log('[AudioPlayer] ❌ No sound loaded');
+        setError('Audio not loaded. Please try again.');
+        return;
+      }
+
+      console.log('[AudioPlayer] ▶️ Starting playback with Expo AV...');
+      await soundRef.current.playAsync();
+      setIsPlaying(true);
+      startProgressTracking();
+      console.log('[AudioPlayer] ✅ Playback started successfully');
+
     } catch (err) {
-      console.error('Error playing audio:', err);
+      console.error('[AudioPlayer] ❌ Error playing audio:', err);
       setError(err instanceof Error ? err.message : 'Failed to play audio');
       setIsPlaying(false);
     }
@@ -270,55 +262,54 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
   const handlePause = async () => {
     try {
-      if (useClientSideTTS && Platform.OS === 'web') {
-        speechSynthesis.cancel();
-      } else if (Platform.OS === 'web' && audioRef.current) {
-        audioRef.current.pause();
-      } else if (Platform.OS !== 'web' && TrackPlayer) {
-        await TrackPlayer.pause();
+      console.log('[AudioPlayer] ⏸️ Pausing playback...');
+      if (soundRef.current) {
+        await soundRef.current.pauseAsync();
       }
       setIsPlaying(false);
+      stopProgressTracking();
+      console.log('[AudioPlayer] ✅ Playback paused');
     } catch (err) {
-      console.error('Error pausing audio:', err);
+      console.error('[AudioPlayer] ❌ Error pausing audio:', err);
     }
   };
 
   const handleSeek = async (value: number) => {
     try {
-      const seekPosition = (value / 100) * duration;
-      if (Platform.OS === 'web' && audioRef.current) {
-        audioRef.current.currentTime = seekPosition;
-      } else if (Platform.OS !== 'web' && TrackPlayer) {
-        await TrackPlayer.seekTo(seekPosition);
+      const seekPosition = (value / 100) * duration * 1000; // Convert to milliseconds
+      console.log('[AudioPlayer] ⏭️ Seeking to:', seekPosition / 1000, 'seconds');
+
+      if (soundRef.current) {
+        await soundRef.current.setPositionAsync(seekPosition);
       }
     } catch (error) {
-      console.error('Error seeking:', error);
+      console.error('[AudioPlayer] ❌ Error seeking:', error);
     }
   };
 
   const handleSkipBackward = async () => {
     try {
-      const newPosition = Math.max(0, currentTime - 15);
-      if (Platform.OS === 'web' && audioRef.current) {
-        audioRef.current.currentTime = newPosition;
-      } else if (Platform.OS !== 'web' && TrackPlayer) {
-        await TrackPlayer.seekTo(newPosition);
+      const newPosition = Math.max(0, (currentTime - 15) * 1000); // Convert to milliseconds
+      console.log('[AudioPlayer] ⏪ Skipping backward to:', newPosition / 1000, 'seconds');
+
+      if (soundRef.current) {
+        await soundRef.current.setPositionAsync(newPosition);
       }
     } catch (error) {
-      console.error('Error skipping backward:', error);
+      console.error('[AudioPlayer] ❌ Error skipping backward:', error);
     }
   };
 
   const handleSkipForward = async () => {
     try {
-      const newPosition = Math.min(duration, currentTime + 15);
-      if (Platform.OS === 'web' && audioRef.current) {
-        audioRef.current.currentTime = newPosition;
-      } else if (Platform.OS !== 'web' && TrackPlayer) {
-        await TrackPlayer.seekTo(newPosition);
+      const newPosition = Math.min(duration * 1000, (currentTime + 15) * 1000); // Convert to milliseconds
+      console.log('[AudioPlayer] ⏩ Skipping forward to:', newPosition / 1000, 'seconds');
+
+      if (soundRef.current) {
+        await soundRef.current.setPositionAsync(newPosition);
       }
     } catch (error) {
-      console.error('Error skipping forward:', error);
+      console.error('[AudioPlayer] ❌ Error skipping forward:', error);
     }
   };
 
@@ -327,12 +318,16 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     const currentIndex = speeds.indexOf(playbackSpeed);
     const nextSpeed = speeds[(currentIndex + 1) % speeds.length];
 
-    if (Platform.OS === 'web' && audioRef.current) {
-      audioRef.current.playbackRate = nextSpeed;
-    } else if (Platform.OS !== 'web' && TrackPlayer) {
-      await TrackPlayer.setRate(nextSpeed);
+    try {
+      console.log('[AudioPlayer] 🏃 Changing speed to:', nextSpeed + 'x');
+
+      if (soundRef.current) {
+        await soundRef.current.setRateAsync(nextSpeed, true);
+      }
+      setPlaybackSpeed(nextSpeed);
+    } catch (error) {
+      console.error('[AudioPlayer] ❌ Error changing speed:', error);
     }
-    setPlaybackSpeed(nextSpeed);
   };
 
   const formatTime = (seconds: number): string => {
@@ -341,21 +336,11 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Calculate progress for native platforms
-  const nativeIsPlaying = Platform.OS !== 'web' && playbackState && State ? playbackState.state === State.Playing : false;
   const currentProgress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const isBuffering = isLoading || isGeneratingAudio;
 
   return (
     <View style={styles.container}>
-      {/* Hidden audio element for web */}
-      {Platform.OS === 'web' && !useClientSideTTS && (
-        <audio
-          ref={audioRef}
-          style={{ display: 'none' }}
-          preload={hasUserInteracted ? "auto" : "none"}
-        />
-      )}
 
       {/* Title */}
       {title && (
@@ -401,18 +386,14 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         {/* Play/Pause */}
         <TouchableOpacity
           style={[styles.playButton, isBuffering && styles.playButtonDisabled]}
-          onPress={(Platform.OS !== 'web' ? nativeIsPlaying : isPlaying) ? handlePause : handlePlay}
-          disabled={isBuffering && !useClientSideTTS}
+          onPress={isPlaying ? handlePause : handlePlay}
+          disabled={isBuffering}
         >
           {isBuffering ? (
-            Platform.OS === 'web' ? (
-              <Ionicons name="hourglass" size={28} color="white" />
-            ) : (
-              <ActivityIndicator size="small" color="white" />
-            )
+            <ActivityIndicator size="small" color="white" />
           ) : (
             <Ionicons
-              name={(Platform.OS !== 'web' ? nativeIsPlaying : isPlaying) ? "pause" : "play"}
+              name={isPlaying ? "pause" : "play"}
               size={28}
               color="white"
             />

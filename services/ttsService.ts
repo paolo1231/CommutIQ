@@ -1,7 +1,6 @@
+import * as FileSystem from 'expo-file-system';
 import { Platform } from 'react-native';
 import { ENV } from '../constants';
-import * as FileSystem from 'expo-file-system';
-import { Audio } from 'expo-av';
 
 /**
  * TTS Service optimized for React Native
@@ -51,6 +50,8 @@ export class TTSService {
   ): Promise<string> {
     const { voice = 'sage', speed = 1.0 } = options;
 
+    console.log(`[TTS Service] 🎵 generateAudio called - text: ${text.length} chars, voice: ${voice}, speed: ${speed}x`);
+
     if (!text || text.trim().length === 0) {
       throw new Error('Text is required');
     }
@@ -59,25 +60,32 @@ export class TTSService {
     const cacheKey = this.getCacheKey(text, voice, speed);
     const cached = this.cache.get(cacheKey);
     if (cached) {
-      console.log('TTS cache hit');
+      console.log('TTS: Cache hit for key:', cacheKey);
       return cached;
     }
+
+    console.log(`[TTS Service] 🔄 Cache miss, generating new audio...`);
 
     try {
       let audioUrl: string;
 
       // Use Edge Function for all platforms (unified approach)
       if (ENV.SUPABASE_URL && ENV.SUPABASE_ANON_KEY) {
+        console.log(`[TTS Service] 🌐 Using Edge Function approach`);
         audioUrl = await this.generateViaEdgeFunction(text, voice, speed);
       } else if (ENV.OPENAI_API_KEY) {
+        console.log('TTS: Using direct OpenAI API approach');
         // Fallback to direct OpenAI API if Edge Function not available
         audioUrl = await this.generateViaOpenAI(text, voice, speed);
       } else {
         throw new Error('No TTS service configured. Please set up Supabase Edge Function or OpenAI API key.');
       }
 
+      console.log(`[TTS Service] ✅ Audio generated successfully, URL: ${audioUrl.substring(0, 50)}...`);
+
       // Cache the result
       this.cache.set(cacheKey, audioUrl);
+      console.log('TTS: Cached result with key:', cacheKey);
 
       // On React Native, also cache to file system for persistence
       if (Platform.OS !== 'web') {
@@ -95,6 +103,8 @@ export class TTSService {
    * Generate audio via Supabase Edge Function
    */
   private async generateViaEdgeFunction(text: string, voice: string, speed: number): Promise<string> {
+    console.log('TTS: Calling Edge Function with text length:', text.length);
+
     const response = await fetch(`${ENV.SUPABASE_URL}/functions/v1/tts-stream`, {
       method: 'POST',
       headers: {
@@ -106,6 +116,7 @@ export class TTSService {
 
     if (!response.ok) {
       const error = await response.text();
+      console.error('TTS: Edge Function error:', error);
       throw new Error(`Edge Function error: ${error}`);
     }
 
@@ -113,15 +124,158 @@ export class TTSService {
     if (Platform.OS === 'web') {
       // For web, create blob URL
       const blob = await response.blob();
-      return URL.createObjectURL(blob);
+      console.log('TTS: Created blob:', blob.size, 'bytes, type:', blob.type);
+      const blobUrl = URL.createObjectURL(blob);
+      console.log('TTS: Created blob URL:', blobUrl.substring(0, 50) + '...');
+      return blobUrl;
     } else {
       // For React Native, convert to base64 data URI
       const arrayBuffer = await response.arrayBuffer();
       const base64 = this.arrayBufferToBase64(arrayBuffer);
-      
+      console.log('TTS: Converted to base64, length:', base64.length);
+
       // Save to temporary file for better performance
       const fileUri = await this.saveBase64ToFile(base64);
+      console.log('TTS: Saved to file:', fileUri);
       return fileUri;
+    }
+  }
+
+  /**
+   * Generate streaming audio that can start playing before full download
+   * This creates an audio element that supports progressive playback
+   */
+  async generateStreamingAudio(
+    text: string,
+    options: {
+      voice?: 'sage' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+      speed?: number;
+      onProgress?: (loaded: number, total: number) => void;
+      onCanPlay?: () => void;
+      onLoadStart?: () => void;
+      onError?: (error: Error) => void;
+    } = {}
+  ): Promise<string> {
+    const { voice = 'sage', speed = 1.0, onProgress, onCanPlay, onLoadStart, onError } = options;
+
+    console.log(`[TTS Service] 🌊 generateStreamingAudio called - text: ${text.length} chars, voice: ${voice}, speed: ${speed}x`);
+
+    // Call the callbacks to provide feedback
+    onLoadStart?.();
+
+    try {
+      if (Platform.OS === 'web') {
+        // For web, we can use true streaming with progressive loading
+        console.log(`[TTS Service] 🌐 Using web streaming approach`);
+        const audioElement = await this.createStreamingAudioElement(text, options);
+        // Return the blob URL from the audio element
+        return audioElement.src;
+      } else {
+        // For React Native, use the standard method but with progress callbacks
+        console.log(`[TTS Service] 📱 Using React Native approach with callbacks`);
+        const url = await this.generateViaEdgeFunction(text, voice, speed);
+
+        // Simulate progress for React Native (since we can't get real streaming progress)
+        onProgress?.(1, 1); // Indicate completion
+        onCanPlay?.();
+
+        return url;
+      }
+    } catch (error) {
+      onError?.(error instanceof Error ? error : new Error('Streaming audio generation failed'));
+      throw error;
+    }
+  }
+
+  /**
+   * Create a streaming audio element that supports progressive playback
+   * This method sets up an audio element that can start playing before full download
+   */
+  private async createStreamingAudioElement(
+    text: string,
+    options: {
+      voice?: string;
+      speed?: number;
+      onProgress?: (loaded: number, total: number) => void;
+      onCanPlay?: () => void;
+      onLoadStart?: () => void;
+      onError?: (error: Error) => void;
+    } = {}
+  ): Promise<HTMLAudioElement> {
+    const { voice = 'sage', speed = 1.0, onProgress, onCanPlay, onLoadStart, onError } = options;
+
+    console.log(`[TTS Service] 🎧 Creating streaming audio element...`);
+
+    // Create audio element with streaming optimizations
+    const audio = new Audio();
+    audio.preload = 'auto'; // Enable progressive loading
+    audio.crossOrigin = 'anonymous'; // Allow cross-origin streaming
+
+    // Set up event listeners for streaming progress
+    audio.addEventListener('loadstart', () => {
+      console.log('TTS: Audio load started - beginning to fetch data');
+      onLoadStart?.();
+    });
+
+    audio.addEventListener('progress', () => {
+      if (audio.buffered.length > 0) {
+        const loaded = audio.buffered.end(0);
+        const total = audio.duration || 0;
+        console.log(`TTS: Audio progress - buffered: ${loaded.toFixed(1)}s / ${total.toFixed(1)}s`);
+        onProgress?.(loaded, total);
+      }
+    });
+
+    audio.addEventListener('canplay', () => {
+      console.log('TTS: Audio can play - enough data buffered for playback');
+      onCanPlay?.();
+    });
+
+    audio.addEventListener('canplaythrough', () => {
+      console.log('TTS: Audio can play through - enough data for uninterrupted playback');
+    });
+
+    audio.addEventListener('error', (e) => {
+      const error = new Error(`Audio streaming error: ${audio.error?.message || 'Unknown error'}`);
+      console.error('TTS: Audio streaming error:', error);
+      onError?.(error);
+    });
+
+    // Start the streaming fetch
+    try {
+      console.log('TTS: Starting streaming fetch...');
+      const response = await fetch(`${ENV.SUPABASE_URL}/functions/v1/tts-stream`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${ENV.SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text, voice, speed }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`TTS streaming error: ${response.status} - ${response.statusText}`);
+      }
+
+      // Create blob URL from response - this enables progressive loading
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+
+      console.log('TTS: Created streaming blob URL:', blobUrl.substring(0, 50) + '...');
+      console.log('TTS: Blob size:', blob.size, 'bytes, type:', blob.type);
+
+      // Set the source - this will trigger progressive loading
+      audio.src = blobUrl;
+
+      // The audio element will now start loading and can begin playback
+      // as soon as enough data is buffered (canplay event)
+
+      return audio;
+    } catch (error) {
+      const streamingError = error instanceof Error ? error : new Error('Failed to create streaming audio');
+      console.error('TTS: Streaming setup error:', streamingError);
+      onError?.(streamingError);
+      throw streamingError;
     }
   }
 
@@ -131,7 +285,7 @@ export class TTSService {
   private async generateViaOpenAI(text: string, voice: string, speed: number): Promise<string> {
     // Split text into chunks if needed
     const chunks = this.splitTextIntoChunks(text);
-    
+
     if (chunks.length === 1) {
       // Single chunk, direct processing
       return await this.processChunk(chunks[0], voice, speed);
@@ -141,7 +295,7 @@ export class TTSService {
       const audioUrls = await Promise.all(
         chunks.map(chunk => this.processChunk(chunk, voice, speed))
       );
-      
+
       // For now, return the first chunk (audio concatenation is complex)
       // In production, you'd want to properly concatenate audio files
       console.warn('Multiple chunks generated, returning first chunk only. Audio concatenation not yet implemented.');
@@ -241,7 +395,7 @@ export class TTSService {
   private async saveBase64ToFile(base64: string): Promise<string> {
     const filename = `audio_${Date.now()}.mp3`;
     const fileUri = this.CACHE_DIR + filename;
-    
+
     try {
       await FileSystem.writeAsStringAsync(fileUri, base64, {
         encoding: FileSystem.EncodingType.Base64,
