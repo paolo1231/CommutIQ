@@ -92,7 +92,7 @@ export default function CourseDetailScreen() {
       const courseData = courseResponse.data;
 
       // Debug logging
-      console.log('Course loaded:', {
+      console.debug('Course loaded:', {
         title: courseData.title,
         courseId: courseData.id,
         lessonsCount: courseData.lessons?.length || 0,
@@ -105,7 +105,7 @@ export default function CourseDetailScreen() {
       // Set lessons sorted by lesson_order
       const sortedLessons = courseData.lessons?.sort((a, b) => a.lesson_order - b.lesson_order) || [];
 
-      console.log('Final lessons:', sortedLessons.map(l => ({ id: l.id, title: l.title })));
+      console.debug('Final lessons:', sortedLessons.map(l => ({ id: l.id, title: l.title })));
       setLessons(sortedLessons);
 
     } catch (error) {

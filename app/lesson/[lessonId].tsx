@@ -1,4 +1,4 @@
-import { AudioPlayer } from '@/components/AudioPlayer';
+import { SimpleStreamingAudioPlayer } from '@/components/SimpleStreamingAudioPlayer';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -126,13 +126,14 @@ export default function LessonScreen() {
 
         {/* Audio Player */}
         <View style={styles.audioPlayerContainer}>
-          <AudioPlayer
+          <SimpleStreamingAudioPlayer
             transcript={lesson.transcript}
             title={lesson.title}
             voice="sage"
-            showTranscript={false}
             autoPlay={false}
-            useClientSideTTS={false}
+            onProgressUpdate={(progress, position) => {
+              console.log(`[Lesson] Audio progress: ${progress.toFixed(1)}% at ${position.toFixed(1)}s`);
+            }}
             onComplete={() => {
               console.log(`[Lesson] Audio playback completed for lesson: ${lesson.title}`);
             }}

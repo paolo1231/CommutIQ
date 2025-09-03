@@ -110,12 +110,26 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               onProgressUpdate?.(progress, position);
             }
 
-            // Check if playback ended
+            // Load next chunk if needed (when approaching end)
+            if (duration > 0) {
+              await loadNextChunkIfNeeded(position, duration);
+            }
+
+            // Check if current chunk ended
             if (status.didJustFinish) {
-              setIsPlaying(false);
-              onComplete?.();
-              if (progressUpdateInterval.current) {
-                clearInterval(progressUpdateInterval.current);
+              console.log(`[AudioPlayer] 🔄 Chunk ${currentChunkIndex + 1}/${totalChunks} finished`);
+
+              if (currentChunkIndex + 1 < totalChunks) {
+                // Transition to next chunk
+                await transitionToNextChunk();
+              } else {
+                // All chunks completed
+                console.log(`[AudioPlayer] 🏁 All chunks completed`);
+                setIsPlaying(false);
+                onComplete?.();
+                if (progressUpdateInterval.current) {
+                  clearInterval(progressUpdateInterval.current);
+                }
               }
             }
           }
@@ -130,6 +144,111 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     if (progressUpdateInterval.current) {
       clearInterval(progressUpdateInterval.current);
       progressUpdateInterval.current = null;
+    }
+  };
+
+  // Load next chunk when current one is near completion
+  const loadNextChunkIfNeeded = async (currentPosition: number, duration: number) => {
+    const timeRemaining = duration - currentPosition;
+    const nextChunkIndex = currentChunkIndex + 1;
+
+    // Load next chunk when 5 seconds remaining or 90% complete
+    if (timeRemaining <= 5 || currentPosition / duration >= 0.9) {
+      if (nextChunkIndex < totalChunks && !audioChunks[nextChunkIndex] && !isLoadingNextChunk) {
+        console.log(`[AudioPlayer] 🔄 Loading next chunk ${nextChunkIndex + 1}/${totalChunks}...`);
+        setIsLoadingNextChunk(true);
+
+        try {
+          const nextChunkUrl = await ttsService.generateChunkByIndex(
+            textChunksRef.current,
+            nextChunkIndex,
+            voice,
+            playbackSpeed
+          );
+
+          // Add to chunks array
+          setAudioChunks(prev => {
+            const newChunks = [...prev];
+            newChunks[nextChunkIndex] = nextChunkUrl;
+            return newChunks;
+          });
+
+          console.log(`[AudioPlayer] ✅ Next chunk ${nextChunkIndex + 1}/${totalChunks} loaded and ready`);
+        } catch (error) {
+          console.error(`[AudioPlayer] ❌ Error loading next chunk:`, error);
+        } finally {
+          setIsLoadingNextChunk(false);
+        }
+      }
+    }
+  };
+
+  // Transition to next chunk when current one ends
+  const transitionToNextChunk = async () => {
+    const nextChunkIndex = currentChunkIndex + 1;
+
+    if (nextChunkIndex >= totalChunks) {
+      console.log(`[AudioPlayer] 🏁 All chunks completed`);
+      setIsPlaying(false);
+      onComplete?.();
+      return;
+    }
+
+    if (!audioChunks[nextChunkIndex]) {
+      console.log(`[AudioPlayer] ⏳ Next chunk not ready, loading...`);
+      setIsLoadingNextChunk(true);
+
+      try {
+        const nextChunkUrl = await ttsService.generateChunkByIndex(
+          textChunksRef.current,
+          nextChunkIndex,
+          voice,
+          playbackSpeed
+        );
+
+        setAudioChunks(prev => {
+          const newChunks = [...prev];
+          newChunks[nextChunkIndex] = nextChunkUrl;
+          return newChunks;
+        });
+
+        await loadAndPlayChunk(nextChunkUrl, nextChunkIndex);
+      } catch (error) {
+        console.error(`[AudioPlayer] ❌ Error loading next chunk:`, error);
+        setError('Failed to load next audio chunk');
+      } finally {
+        setIsLoadingNextChunk(false);
+      }
+    } else {
+      await loadAndPlayChunk(audioChunks[nextChunkIndex], nextChunkIndex);
+    }
+  };
+
+  // Load and play a specific chunk
+  const loadAndPlayChunk = async (chunkUrl: string, chunkIndex: number) => {
+    try {
+      console.log(`[AudioPlayer] 🔄 Loading chunk ${chunkIndex + 1}/${totalChunks}...`);
+
+      // Unload current sound
+      if (soundRef.current) {
+        await soundRef.current.unloadAsync();
+      }
+
+      // Load new chunk
+      await loadAudio(chunkUrl);
+      setCurrentChunkIndex(chunkIndex);
+      setAudioUrl(chunkUrl);
+
+      // Start playing immediately
+      if (soundRef.current) {
+        await soundRef.current.playAsync();
+        setIsPlaying(true);
+        startProgressTracking();
+        console.log(`[AudioPlayer] ▶️ Playing chunk ${chunkIndex + 1}/${totalChunks}`);
+      }
+    } catch (error) {
+      console.error(`[AudioPlayer] ❌ Error loading chunk ${chunkIndex + 1}:`, error);
+      setError(`Failed to play chunk ${chunkIndex + 1}`);
     }
   };
 
@@ -149,7 +268,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       setError(null);
       console.log('[AudioPlayer] 🎵 Starting audio generation...');
 
-      // Use streaming audio generation for better performance
+      // Use streaming audio generation (single continuous stream)
       const url = await ttsService.generateStreamingAudio(transcript, {
         voice,
         speed: playbackSpeed,
@@ -170,11 +289,22 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         },
       });
 
-      console.log('[AudioPlayer] 🎵 Audio generated, URL:', url.substring(0, 50) + '...');
-      setAudioUrl(url);
+      console.log('[AudioPlayer] 🎵 First chunk ready:', streamingResult.firstChunkUrl.substring(0, 50) + '...');
+      console.log('[AudioPlayer] 📝 Total chunks:', streamingResult.totalChunks);
 
-      // Load audio with Expo AV
-      await loadAudio(url);
+      // Set up streaming state
+      textChunksRef.current = streamingResult.textChunks;
+      setTotalChunks(streamingResult.totalChunks);
+      setCurrentChunkIndex(0);
+
+      // Initialize chunks array with first chunk
+      const initialChunks = new Array(streamingResult.totalChunks).fill(null);
+      initialChunks[0] = streamingResult.firstChunkUrl;
+      setAudioChunks(initialChunks);
+      setAudioUrl(streamingResult.firstChunkUrl);
+
+      // Load first chunk with Expo AV
+      await loadAudio(streamingResult.firstChunkUrl);
 
       if (autoPlay) {
         console.log('[AudioPlayer] 🚀 Auto-playing...');
@@ -190,7 +320,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
   const loadAudio = async (uri: string) => {
     try {
-      console.log('[AudioPlayer] 🔄 Loading audio with Expo AV...');
+      console.log('[AudioPlayer] 🔄 Loading audio with Expo AV (streaming mode)...');
 
       // Check if Audio is available
       if (!Audio || !Audio.Sound) {
@@ -202,23 +332,52 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         await soundRef.current.unloadAsync();
       }
 
-      // Create new sound
+      // Create new sound with streaming-optimized settings
       const { sound } = await Audio.Sound.createAsync(
         { uri },
         {
           shouldPlay: false,
           isLooping: false,
           rate: playbackSpeed,
+          // Optimize for streaming
+          progressUpdateIntervalMillis: 500, // More frequent updates
+          positionMillis: 0,
+        },
+        // Status update callback for real-time feedback
+        (status) => {
+          if (status.isLoaded) {
+            // Update duration as soon as it's available
+            if (status.durationMillis && status.durationMillis !== duration * 1000) {
+              setDuration(status.durationMillis / 1000);
+              console.log('[AudioPlayer] 📏 Duration updated:', status.durationMillis / 1000, 'seconds');
+            }
+
+            // Update position
+            if (status.positionMillis !== undefined) {
+              setCurrentTime(status.positionMillis / 1000);
+            }
+
+            // Check if we can start playing (even with partial data)
+            if (status.isBuffering === false && !isPlaying && autoPlay) {
+              console.log('[AudioPlayer] 🚀 Auto-starting playback (streaming ready)');
+              sound.playAsync().catch(console.error);
+              setIsPlaying(true);
+              startProgressTracking();
+            }
+          }
         }
       );
 
       soundRef.current = sound;
-      console.log('[AudioPlayer] ✅ Audio loaded successfully');
+      console.log('[AudioPlayer] ✅ Audio loaded with streaming optimization');
 
-      // Get initial status to set duration
+      // Start loading immediately but don't wait for full download
       const status = await sound.getStatusAsync();
-      if (status.isLoaded && status.durationMillis) {
-        setDuration(status.durationMillis / 1000);
+      if (status.isLoaded) {
+        if (status.durationMillis) {
+          setDuration(status.durationMillis / 1000);
+        }
+        console.log('[AudioPlayer] 🎵 Audio ready for streaming playback');
       }
 
     } catch (error) {
@@ -247,16 +406,43 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         return;
       }
 
-      console.log('[AudioPlayer] ▶️ Starting playback with Expo AV...');
+      // Check if sound is ready to play
+      const status = await soundRef.current.getStatusAsync();
+      if (!status.isLoaded) {
+        console.log('[AudioPlayer] ⏳ Sound not loaded yet, waiting...');
+        setIsLoading(true);
+
+        // Wait a bit and try again
+        setTimeout(async () => {
+          try {
+            const newStatus = await soundRef.current!.getStatusAsync();
+            if (newStatus.isLoaded) {
+              console.log('[AudioPlayer] ✅ Sound now loaded, starting playback');
+              await soundRef.current!.playAsync();
+              setIsPlaying(true);
+              setIsLoading(false);
+              startProgressTracking();
+            }
+          } catch (error) {
+            console.error('[AudioPlayer] ❌ Error in delayed play:', error);
+            setIsLoading(false);
+          }
+        }, 1000);
+        return;
+      }
+
+      console.log('[AudioPlayer] ▶️ Starting streaming playback...');
       await soundRef.current.playAsync();
       setIsPlaying(true);
+      setIsLoading(false);
       startProgressTracking();
-      console.log('[AudioPlayer] ✅ Playback started successfully');
+      console.log('[AudioPlayer] ✅ Streaming playback started');
 
     } catch (err) {
       console.error('[AudioPlayer] ❌ Error playing audio:', err);
       setError(err instanceof Error ? err.message : 'Failed to play audio');
       setIsPlaying(false);
+      setIsLoading(false);
     }
   };
 

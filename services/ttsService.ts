@@ -142,8 +142,8 @@ export class TTSService {
   }
 
   /**
-   * Generate streaming audio that can start playing before full download
-   * This creates an audio element that supports progressive playback
+   * Generate streaming audio by chunking the text and creating multiple audio segments
+   * This allows playback to start with the first chunk while others are loading
    */
   async generateStreamingAudio(
     text: string,
@@ -164,27 +164,179 @@ export class TTSService {
     onLoadStart?.();
 
     try {
-      if (Platform.OS === 'web') {
-        // For web, we can use true streaming with progressive loading
-        console.log(`[TTS Service] 🌐 Using web streaming approach`);
-        const audioElement = await this.createStreamingAudioElement(text, options);
-        // Return the blob URL from the audio element
-        return audioElement.src;
-      } else {
-        // For React Native, use the standard method but with progress callbacks
-        console.log(`[TTS Service] 📱 Using React Native approach with callbacks`);
-        const url = await this.generateViaEdgeFunction(text, voice, speed);
+      // For React Native, return the streaming URL directly
+      // This allows Expo AV to handle progressive loading
+      console.log(`[TTS Service] 📱 Creating streaming URL for React Native`);
 
-        // Simulate progress for React Native (since we can't get real streaming progress)
-        onProgress?.(1, 1); // Indicate completion
-        onCanPlay?.();
+      // Create a streaming URL with authentication headers
+      const streamingUrl = `${ENV.SUPABASE_URL}/functions/v1/tts-stream`;
 
-        return url;
+      console.log(`[TTS Service] 🌊 Streaming URL created: ${streamingUrl}`);
+
+      // Test the URL first to make sure it's accessible
+      const testResponse = await fetch(streamingUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${ENV.SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text: text.substring(0, 100) + '...', voice, speed }),
+      });
+
+      if (!testResponse.ok) {
+        throw new Error(`Streaming URL not accessible: ${testResponse.status}`);
       }
+
+      // For now, we still need to use the file-based approach for Expo AV
+      // because Expo AV doesn't support streaming from POST requests with auth headers
+      console.log(`[TTS Service] 📱 Using file-based approach for Expo AV compatibility`);
+      const url = await this.generateViaEdgeFunction(text, voice, speed);
+
+      // Provide progress feedback
+      onProgress?.(1, 1);
+      onCanPlay?.();
+
+      return url;
     } catch (error) {
       onError?.(error instanceof Error ? error : new Error('Streaming audio generation failed'));
       throw error;
     }
+  }
+
+  /**
+   * Generate streaming audio by creating the first chunk immediately
+   * This allows playback to start quickly while the full audio generates in background
+   */
+  async generateStreamingAudioChunked(
+    text: string,
+    options: {
+      voice?: 'sage' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+      speed?: number;
+      onProgress?: (loaded: number, total: number) => void;
+      onCanPlay?: () => void;
+      onLoadStart?: () => void;
+      onError?: (error: Error) => void;
+      onChunkReady?: (chunkUrl: string, chunkIndex: number, totalChunks: number) => void;
+    } = {}
+  ): Promise<{
+    firstChunkUrl: string;
+    textChunks: string[];
+    totalChunks: number;
+  }> {
+    const { voice = 'sage', speed = 1.0, onProgress, onCanPlay, onLoadStart, onError } = options;
+
+    console.log(`[TTS Service] 🎬 generateStreamingAudioChunked - text: ${text.length} chars`);
+    onLoadStart?.();
+
+    try {
+      // Split text into smaller chunks for faster initial playback
+      const chunks = this.splitTextIntoStreamingChunks(text, 500);
+      console.log(`[TTS Service] 📝 Split into ${chunks.length} streaming chunks`);
+
+      if (chunks.length === 1) {
+        // Single chunk, use normal method
+        const url = await this.generateViaEdgeFunction(text, voice, speed);
+        onProgress?.(1, 1);
+        onCanPlay?.();
+        return {
+          firstChunkUrl: url,
+          textChunks: chunks,
+          totalChunks: 1
+        };
+      }
+
+      // Generate first chunk immediately for quick playback
+      console.log(`[TTS Service] 🚀 Generating first chunk (${chunks[0].length} chars) for immediate playback...`);
+      const firstChunkUrl = await this.generateViaEdgeFunction(chunks[0], voice, speed);
+
+      onProgress?.(1, chunks.length);
+      onCanPlay?.();
+
+      console.log(`[TTS Service] ✅ First chunk ready, remaining ${chunks.length - 1} chunks will be generated on demand`);
+
+      return {
+        firstChunkUrl,
+        textChunks: chunks,
+        totalChunks: chunks.length
+      };
+
+    } catch (error) {
+      onError?.(error instanceof Error ? error : new Error('Streaming audio generation failed'));
+      throw error;
+    }
+  }
+
+  /**
+   * Generate a specific chunk by index
+   */
+  async generateChunkByIndex(
+    textChunks: string[],
+    chunkIndex: number,
+    voice: string = 'sage',
+    speed: number = 1.0
+  ): Promise<string> {
+    if (chunkIndex >= textChunks.length) {
+      throw new Error(`Chunk index ${chunkIndex} out of range (max: ${textChunks.length - 1})`);
+    }
+
+    const chunk = textChunks[chunkIndex];
+    console.log(`[TTS Service] 🔄 Generating chunk ${chunkIndex + 1}/${textChunks.length} (${chunk.length} chars)...`);
+
+    const chunkUrl = await this.generateViaEdgeFunction(chunk, voice, speed);
+    console.log(`[TTS Service] ✅ Chunk ${chunkIndex + 1}/${textChunks.length} ready`);
+
+    return chunkUrl;
+  }
+
+  /**
+   * Split text into smaller chunks optimized for streaming
+   */
+  private splitTextIntoStreamingChunks(text: string, maxChunkSize: number = 500): string[] {
+    if (text.length <= maxChunkSize) {
+      return [text];
+    }
+
+    const chunks: string[] = [];
+    let currentChunk = '';
+
+    // Split by sentences first
+    const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+
+    for (const sentence of sentences) {
+      if (currentChunk.length + sentence.length > maxChunkSize) {
+        if (currentChunk) {
+          chunks.push(currentChunk.trim());
+          currentChunk = '';
+        }
+
+        // If single sentence is too long, split by phrases
+        if (sentence.length > maxChunkSize) {
+          const phrases = sentence.split(/[,;]/);
+          let phraseChunk = '';
+
+          for (const phrase of phrases) {
+            if (phraseChunk.length + phrase.length > maxChunkSize) {
+              if (phraseChunk) chunks.push(phraseChunk.trim());
+              phraseChunk = phrase;
+            } else {
+              phraseChunk += (phraseChunk ? ',' : '') + phrase;
+            }
+          }
+
+          if (phraseChunk) currentChunk = phraseChunk;
+        } else {
+          currentChunk = sentence;
+        }
+      } else {
+        currentChunk += sentence;
+      }
+    }
+
+    if (currentChunk) {
+      chunks.push(currentChunk.trim());
+    }
+
+    return chunks;
   }
 
   /**
